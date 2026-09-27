@@ -1,0 +1,17 @@
+# Android and Gradle
+.gradle/
+build/
+**/build/
+local.properties
+*.iml
+.idea/
+
+# Signing and local secrets
+*.jks
+*.keystore
+key.properties
+.env
+server/.env
+
+# OS files
+.DS_Store

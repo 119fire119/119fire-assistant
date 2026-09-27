@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>119파이어 비서</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header>
+  <div><b>🔥 119파이어 비서</b><small>HTML 화면 + Android 네이티브 기능</small></div>
+  <button onclick="showTab('settings')">⚙️</button>
+</header>
+
+<main>
+  <section id="home" class="tab active">
+    <div class="hero"><small>하이브리드 APK V1</small><h1>현장과 통화를<br>비서가 이어서 정리합니다.</h1></div>
+    <div class="stats">
+      <div><b id="leadCount">0</b><span>문의</span></div>
+      <div><b id="taskCount">0</b><span>할 일</span></div>
+      <div><b id="recordCount">0</b><span>녹음 발견</span></div>
+      <div><b id="photoCount">0</b><span>사진</span></div>
+    </div>
+    <h2>빠른 실행</h2>
+    <div class="grid">
+      <button onclick="newLead()">📞<b>문의 등록</b><small>고객 메모</small></button>
+      <button onclick="takePhoto()">📷<b>현장 촬영</b><small>현장별 저장</small></button>
+      <button onclick="scanRecordings()">🎙<b>통화녹음</b><small>최근 파일 찾기</small></button>
+      <button onclick="showTab('ai')">🤖<b>AI 비서</b><small>업무 질문</small></button>
+    </div>
+    <h2>최근 업무</h2>
+    <div id="recent"></div>
+  </section>
+
+  <section id="calls" class="tab">
+    <div class="pagehead"><div><h1>통화녹음</h1><p>삼성 전화앱이 저장한 파일을 연결해서 사용</p></div></div>
+    <div class="notice">앱 자체가 통화를 녹음하지 않습니다. 갤럭시 기본 통화녹음 파일을 사용합니다.</div>
+    <div class="card">
+      <div class="row"><b>녹음 폴더</b><span id="folderState">미연결</span></div>
+      <button class="primary" onclick="Native.pickCallFolder()">통화녹음 폴더 연결</button>
+      <button class="secondary" onclick="scanRecordings()">지금 새 녹음 찾기</button>
+      <div class="row mt"><b>자동 감지</b><span id="monitorState">꺼짐</span></div>
+      <button class="secondary" id="monitorBtn" onclick="toggleMonitor()">자동 감지 켜기</button>
+      <small class="muted">Android WorkManager 기준 약 15분 단위의 백그라운드 확인입니다.</small>
+    </div>
+    <div id="recordings"></div>
+  </section>
+
+  <section id="photos" class="tab">
+    <div class="pagehead"><div><h1>현장 사진</h1><p>현재 현장명을 지정하고 바로 촬영</p></div></div>
+    <div class="card">
+      <label>현재 현장명</label>
+      <input id="currentJob" placeholder="예: 나주 ○○공장">
+      <button class="primary" onclick="takePhoto()">📷 사진 촬영</button>
+    </div>
+    <div id="photosList"></div>
+  </section>
+
+  <section id="ai" class="tab">
+    <div class="pagehead"><div><h1>AI 비서</h1><p>API Key는 APK가 아니라 서버에 보관</p></div></div>
+    <div class="chips">
+      <button onclick="quickAi('오늘 할 일과 다시 연락할 고객을 정리해줘.')">오늘 브리핑</button>
+      <button onclick="quickAi('현재 문의 중 견적 또는 회신이 필요한 건을 정리해줘.')">후속 연락</button>
+      <button onclick="quickAi('현재 업무 데이터를 보고 빠뜨린 일이 있는지 확인해줘.')">누락 점검</button>
+    </div>
+    <div id="chat"></div>
+    <textarea id="aiInput" placeholder="예: 지금 뭐부터 해야 돼?"></textarea>
+    <button class="primary" onclick="askAi()">보내기</button>
+  </section>
+
+  <section id="settings" class="tab">
+    <div class="pagehead"><div><h1>설정</h1><p>AI 서버 연결</p></div></div>
+    <div class="card">
+      <label>Netlify 서버 주소</label>
+      <input id="serverBase" placeholder="https://xxxxx.netlify.app">
+      <label>앱 접속 코드</label>
+      <input id="accessCode" type="password" placeholder="APP_ACCESS_CODE">
+      <button class="primary" onclick="saveSettings()">저장</button>
+      <small class="muted">OpenAI API Key는 여기에 입력하지 않습니다.</small>
+    </div>
+    <div class="card">
+      <b>현재 네이티브 상태</b>
+      <pre id="nativeStatus"></pre>
+    </div>
+  </section>
+</main>
+
+<nav>
+  <button class="active" onclick="showTab('home')" data-tab="home">🏠<span>홈</span></button>
+  <button onclick="showTab('calls')" data-tab="calls">🎙<span>통화</span></button>
+  <button onclick="showTab('photos')" data-tab="photos">📷<span>현장</span></button>
+  <button onclick="showTab('ai')" data-tab="ai">🤖<span>비서</span></button>
+</nav>
+
+<div id="toast" class="toast"></div>
+<script src="app.js"></script>
+</body>
+</html>
