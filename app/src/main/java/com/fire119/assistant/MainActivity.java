@@ -664,7 +664,13 @@ public class MainActivity extends Activity {
         int code = c.getResponseCode();
         InputStream in = code >= 200 && code < 300 ? c.getInputStream() : c.getErrorStream();
         String text = readAll(in);
-        if (code < 200 || code >= 300) throw new Exception(extractError(text, "서버 오류 "+code));
+        if (code < 200 || code >= 300) {
+            String contentType = c.getContentType() == null ? "" : c.getContentType().toLowerCase(Locale.ROOT);
+            if (code == 401 && contentType.contains("text/html") && text.contains("edge-access"))
+                throw new Exception("Netlify 사이트 로그인 보호가 AI 함수를 막고 있습니다. 사이트 소유 계정에서 접근 설정을 확인해주세요.");
+            if (code == 404) throw new Exception("Netlify AI 함수가 배포되지 않았습니다. 서버 배포 설정을 확인해주세요.");
+            throw new Exception(extractError(text, "AI 서버 연결 오류 ("+code+")"));
+        }
         return text;
     }
 
