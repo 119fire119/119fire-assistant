@@ -20,7 +20,7 @@ export default async (request) => {
   if(request.method!=="POST") return new Response(JSON.stringify({error:"POST only"}),{status:405,headers:H});
   const key=Netlify.env.get("OPENAI_API_KEY");
   const appCode=Netlify.env.get("APP_ACCESS_CODE");
-  const model=Netlify.env.get("OPENAI_MODEL")||"gpt-5.6-luna";
+  const model=Netlify.env.get("OPENAI_MODEL")||"gpt-5";
   if(!key||!appCode) return new Response(JSON.stringify({error:"서버 환경변수 설정이 필요합니다."}),{status:500,headers:H});
   let body={}; try{body=await request.json()}catch{}
   if(body.code!==appCode) return new Response(JSON.stringify({error:"앱 접속 코드가 맞지 않습니다."}),{status:401,headers:H});
@@ -34,7 +34,8 @@ export default async (request) => {
         model,
         instructions:SYSTEM,
         input:[{role:"user",content:[{type:"input_text",text:`[앱 데이터]\n${context}\n\n[요청]\n${message}`}]}],
-        max_output_tokens:1600
+        max_output_tokens:1600,
+        store:false
       })
     });
     const d=await r.json();

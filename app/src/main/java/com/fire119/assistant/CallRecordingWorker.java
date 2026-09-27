@@ -50,7 +50,21 @@ public class CallRecordingWorker extends Worker {
 
                 long modified = f.lastModified();
                 if (modified > lastSeen) {
-                    count++;
+                    WorkDatabase.Store store = WorkDatabase.get(ctx).store();
+                    if (store.callByUri(f.getUri().toString()) == null) {
+                        WorkDatabase.CallRecord call = new WorkDatabase.CallRecord();
+                        call.sourceUri = f.getUri().toString();
+                        call.displayName = f.getName() == null ? "통화녹음" : f.getName();
+                        call.fileSize = f.length(); call.modifiedAt = modified; call.processingStatus = "대기";
+                        long id = store.insertCall(call);
+                        if (id > 0) {
+                            WorkDatabase.AutomationJob job = new WorkDatabase.AutomationJob();
+                            job.type = "AI_ANALYZE_CALL"; job.dedupeKey = "call:" + call.sourceUri;
+                            job.payloadJson = "{\"callId\":" + id + "}";
+                            store.insertJob(job);
+                            count++;
+                        }
+                    }
                     if (modified > newest) newest = modified;
                 }
             }

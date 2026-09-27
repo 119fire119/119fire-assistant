@@ -10,8 +10,8 @@ android {
         applicationId = "com.fire119.assistant"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1-hybrid"
+        versionCode = 2
+        versionName = "2.0-personal-assistant"
     }
 
     buildTypes {
@@ -35,4 +35,6 @@ dependencies {
     implementation("androidx.core:core:1.15.0")
     implementation("androidx.documentfile:documentfile:1.0.1")
     implementation("androidx.work:work-runtime:2.10.0")
+    implementation("androidx.room:room-runtime:2.6.1")
+    annotationProcessor("androidx.room:room-compiler:2.6.1")
 }

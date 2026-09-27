@@ -1,98 +1,59 @@
 <!doctype html>
 <html lang="ko">
 <head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>119파이어 비서</title>
-<link rel="stylesheet" href="styles.css">
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>119파이어 비서 V2</title><link rel="stylesheet" href="styles.css">
 </head>
 <body>
-<header>
-  <div><b>🔥 119파이어 비서</b><small>HTML 화면 + Android 네이티브 기능</small></div>
-  <button onclick="showTab('settings')">⚙️</button>
-</header>
-
+<header><div><b>🔥 119파이어 비서</b><small id="todayLabel">오늘 업무를 확인하는 중</small></div><button class="icon" onclick="showTab('settings')">⚙</button></header>
 <main>
   <section id="home" class="tab active">
-    <div class="hero"><small>하이브리드 APK V1</small><h1>현장과 통화를<br>비서가 이어서 정리합니다.</h1></div>
-    <div class="stats">
-      <div><b id="leadCount">0</b><span>문의</span></div>
-      <div><b id="taskCount">0</b><span>할 일</span></div>
-      <div><b id="recordCount">0</b><span>녹음 발견</span></div>
-      <div><b id="photoCount">0</b><span>사진</span></div>
-    </div>
-    <h2>빠른 실행</h2>
-    <div class="grid">
-      <button onclick="newLead()">📞<b>문의 등록</b><small>고객 메모</small></button>
-      <button onclick="takePhoto()">📷<b>현장 촬영</b><small>현장별 저장</small></button>
-      <button onclick="scanRecordings()">🎙<b>통화녹음</b><small>최근 파일 찾기</small></button>
-      <button onclick="showTab('ai')">🤖<b>AI 비서</b><small>업무 질문</small></button>
-    </div>
-    <h2>최근 업무</h2>
-    <div id="recent"></div>
+    <div class="hero"><span class="pill">개인용 완전자동 업무비서 V2</span><h1>전화 받고, 현장 가고,<br>끝났다고만 말하세요.</h1><p id="briefing">오늘 업무를 불러오는 중입니다.</p></div>
+    <button class="voice-cta" onclick="startVoice()"><span>🎙</span><div><b>119비서에게 말하기</b><small>운전 중에는 버튼을 누르고 짧게 말하세요</small></div></button>
+    <button class="organize" onclick="organizeToday()">✨ 오늘 거 알아서 정리해 <small>통화·현장·사진·할 일을 점검</small></button>
+    <div class="metrics" id="metrics"></div>
+    <h2>지금 먼저 할 일</h2><div id="priorityTasks"></div>
+    <h2>최근 현장·통화</h2><div id="recentWork"></div>
   </section>
-
-  <section id="calls" class="tab">
-    <div class="pagehead"><div><h1>통화녹음</h1><p>삼성 전화앱이 저장한 파일을 연결해서 사용</p></div></div>
-    <div class="notice">앱 자체가 통화를 녹음하지 않습니다. 갤럭시 기본 통화녹음 파일을 사용합니다.</div>
-    <div class="card">
-      <div class="row"><b>녹음 폴더</b><span id="folderState">미연결</span></div>
-      <button class="primary" onclick="Native.pickCallFolder()">통화녹음 폴더 연결</button>
-      <button class="secondary" onclick="scanRecordings()">지금 새 녹음 찾기</button>
-      <div class="row mt"><b>자동 감지</b><span id="monitorState">꺼짐</span></div>
-      <button class="secondary" id="monitorBtn" onclick="toggleMonitor()">자동 감지 켜기</button>
-      <small class="muted">Android WorkManager 기준 약 15분 단위의 백그라운드 확인입니다.</small>
-    </div>
-    <div id="recordings"></div>
+  <section id="inquiries" class="tab">
+    <div class="pagehead"><h1>문의</h1><p>전화번호를 기준으로 기존 고객과 연결합니다.</p></div>
+    <button class="primary" onclick="toggleForm('inquiryForm')">＋ 신규 문의</button>
+    <form id="inquiryForm" class="card form hidden" onsubmit="saveInquiry(event)">
+      <label>고객명 <small>이름이 확실할 때만</small></label><input id="customerName" placeholder="이름 미확인 가능">
+      <label>전화번호</label><input id="customerPhone" inputmode="tel" placeholder="010-0000-0000">
+      <label>현장명</label><input id="siteName" placeholder="예: 나주 ○○체육관">
+      <label>주소</label><input id="siteAddress" placeholder="확실한 주소만 입력">
+      <label>문의 내용</label><textarea id="inquiryContent" required placeholder="고객이 실제로 말한 증상·요청"></textarea>
+      <label>유입경로</label><select id="inquirySource"><option>확인 불가</option><option>네이버 검색</option><option>네이버 광고</option><option>네이버 블로그</option><option>기존 고객</option><option>소개</option><option>기타</option></select>
+      <label>다시 연락할 날짜 <small>확실할 때만</small></label><input id="inquiryDue" type="datetime-local">
+      <button class="primary">저장</button>
+    </form><div id="inquiryList"></div>
   </section>
-
-  <section id="photos" class="tab">
-    <div class="pagehead"><div><h1>현장 사진</h1><p>현재 현장명을 지정하고 바로 촬영</p></div></div>
-    <div class="card">
-      <label>현재 현장명</label>
-      <input id="currentJob" placeholder="예: 나주 ○○공장">
-      <button class="primary" onclick="takePhoto()">📷 사진 촬영</button>
-    </div>
-    <div id="photosList"></div>
+  <section id="sites" class="tab">
+    <div class="pagehead"><h1>현장</h1><p>사진·작업기록·견적·수금을 한 현장에 연결합니다.</p></div>
+    <div class="card"><label>현재 현장명</label><input id="currentJob" placeholder="예: 나주 ○○현장"><div class="two"><button class="primary" type="button" onclick="takePhoto()">📷 현장 촬영</button><button class="secondary" type="button" onclick="saveVoiceMemo()">🎙 음성 메모</button></div><small>사진은 공사 전·중·후·기타로 나중에 분류할 수 있습니다.</small></div>
+    <div class="card finish"><b>“끝났어” 자동마감</b><p>사진 누락·작업기록·수금 확인 후보를 만들고, 중요한 완료 상태는 직접 확인합니다.</p><select id="finishSiteSelect"></select><textarea id="finishNote" placeholder="실제로 한 작업만 짧게 기록하세요."></textarea><button class="primary" onclick="finishSite()">현장 끝났어</button></div>
+    <h2>현장 목록</h2><div id="siteList"></div><h2>최근 사진</h2><div id="photoList"></div>
   </section>
-
-  <section id="ai" class="tab">
-    <div class="pagehead"><div><h1>AI 비서</h1><p>API Key는 APK가 아니라 서버에 보관</p></div></div>
-    <div class="chips">
-      <button onclick="quickAi('오늘 할 일과 다시 연락할 고객을 정리해줘.')">오늘 브리핑</button>
-      <button onclick="quickAi('현재 문의 중 견적 또는 회신이 필요한 건을 정리해줘.')">후속 연락</button>
-      <button onclick="quickAi('현재 업무 데이터를 보고 빠뜨린 일이 있는지 확인해줘.')">누락 점검</button>
-    </div>
-    <div id="chat"></div>
-    <textarea id="aiInput" placeholder="예: 지금 뭐부터 해야 돼?"></textarea>
-    <button class="primary" onclick="askAi()">보내기</button>
+  <section id="estimates" class="tab">
+    <div class="pagehead"><h1>견적</h1><p>저장한 단가만 사용합니다. AI가 단가를 임의로 만들지 않습니다.</p></div>
+    <form class="card form" onsubmit="saveEstimate(event)"><label>견적 제목</label><input id="estimateTitle" placeholder="예: 나주 ○○체육관 감지기 교체"><div id="estimateRows"></div><button class="secondary" type="button" onclick="addEstimateRow()">＋ 항목 추가</button><div class="totals"><span>공급가액 <b id="supplyTotal">0원</b></span><span>부가세 <b id="vatTotal">0원</b></span><strong>합계 <b id="grandTotal">0원</b></strong></div><button class="primary">견적 초안 저장</button></form>
+    <div class="notice">최종 금액 확정·고객 발송은 자동으로 하지 않습니다.</div><div id="estimateList"></div>
   </section>
-
+  <section id="assistant" class="tab">
+    <div class="pagehead"><h1>119 비서</h1><p>저장된 기록만 찾아 답합니다. 없는 사실은 “확인 필요”로 남깁니다.</p></div>
+    <div class="chips"><button onclick="quickAsk('지금 뭐부터 해야 돼?')">지금 뭐부터?</button><button onclick="quickAsk('오늘 거 알아서 정리해')">오늘 정리</button><button onclick="quickAsk('견적 보내고 답 없는 사람 있어?')">회신대기</button><button onclick="quickAsk('돈 아직 안 받은 현장 알려줘')">미수금</button></div>
+    <button class="voice-cta small" onclick="startVoice()">🎙 119비서에게 말하기</button><div id="chat" class="chat"></div><textarea id="askText" placeholder="예: 김 사장 마지막 통화 뭐였지?"></textarea><button class="primary" onclick="askAssistant()">보내기</button>
+    <div class="card"><b>새 통화 자동 정리</b><p id="recordingInfo">삼성 통화녹음 폴더를 1회 연결하면 새 파일을 중복 없이 대기열에 넣습니다.</p><div class="two"><button class="secondary" onclick="Native.pickCallFolder()">녹음 폴더 연결</button><button class="secondary" onclick="scanRecordings()">지금 확인</button></div><button class="secondary" onclick="processPendingCalls()">대기 통화 AI 분석</button><small>Android 정책상 SAF 폴더의 완전 실시간 감지는 보장할 수 없어, WorkManager 주기 확인과 수동 즉시 확인을 함께 사용합니다.</small></div>
+  </section>
   <section id="settings" class="tab">
-    <div class="pagehead"><div><h1>설정</h1><p>AI 서버 연결</p></div></div>
-    <div class="card">
-      <label>Netlify 서버 주소</label>
-      <input id="serverBase" placeholder="https://xxxxx.netlify.app">
-      <label>앱 접속 코드</label>
-      <input id="accessCode" type="password" placeholder="APP_ACCESS_CODE">
-      <button class="primary" onclick="saveSettings()">저장</button>
-      <small class="muted">OpenAI API Key는 여기에 입력하지 않습니다.</small>
-    </div>
-    <div class="card">
-      <b>현재 네이티브 상태</b>
-      <pre id="nativeStatus"></pre>
-    </div>
+    <div class="pagehead"><h1>설정</h1><p>업무에 필요한 것만 간단히 설정합니다.</p></div>
+    <div class="card"><b>자동화</b><label class="toggle"><input id="voiceReply" type="checkbox" onchange="setVoiceReply(this.checked)"><span>음성 답변 읽어주기</span></label><label class="toggle"><input id="monitorEnabled" type="checkbox" onchange="toggleMonitor(this.checked)"><span>통화녹음 자동 확인</span></label></div>
+    <div class="card"><b>캘린더·Drive</b><p>일정은 후보로 저장한 뒤 최종 확인할 수 있습니다. Google Calendar와 Drive는 OAuth 승인이 필요한 연결 기능입니다.</p><button class="secondary" onclick="toastMsg('Google 계정 OAuth 설정이 필요한 기능입니다.')">캘린더 연결 준비</button><button class="secondary" onclick="toastMsg('Google Drive OAuth 설정이 필요한 기능입니다.')">Drive 백업 준비</button></div>
+    <details class="card"><summary>AI 서버 연결 <small>개인용 연결 설정</small></summary><label>Netlify 서버 주소</label><input id="serverBase" placeholder="https://xxxxx.netlify.app"><label>앱 접속 코드</label><input id="accessCode" type="password" placeholder="APP_ACCESS_CODE"><button class="primary" onclick="saveSettings()">연결 저장</button><small>OpenAI API Key는 절대 앱에 입력하거나 저장하지 않습니다.</small></details>
+    <div class="card"><b>데이터</b><p>이 앱은 Room 로컬 DB에 업무기록을 먼저 저장합니다.</p><button class="secondary" onclick="migrateV1()">V1 기록 한 번 이전</button></div>
   </section>
 </main>
-
-<nav>
-  <button class="active" onclick="showTab('home')" data-tab="home">🏠<span>홈</span></button>
-  <button onclick="showTab('calls')" data-tab="calls">🎙<span>통화</span></button>
-  <button onclick="showTab('photos')" data-tab="photos">📷<span>현장</span></button>
-  <button onclick="showTab('ai')" data-tab="ai">🤖<span>비서</span></button>
-</nav>
-
-<div id="toast" class="toast"></div>
-<script src="app.js"></script>
-</body>
-</html>
+<nav><button class="active" data-tab="home" onclick="showTab('home')">⌂<span>홈</span></button><button data-tab="inquiries" onclick="showTab('inquiries')">☎<span>문의</span></button><button data-tab="sites" onclick="showTab('sites')">▣<span>현장</span></button><button data-tab="estimates" onclick="showTab('estimates')">₩<span>견적</span></button><button data-tab="assistant" onclick="showTab('assistant')">✦<span>비서</span></button></nav>
+<div id="toast" class="toast"></div><script src="app.js"></script>
+</body></html>
