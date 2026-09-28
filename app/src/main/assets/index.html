@@ -5,15 +5,15 @@
   <title>119파이어 비서 V2</title><link rel="stylesheet" href="styles.css">
 </head>
 <body>
-<header><div><b>🔥 119파이어 비서</b><small id="todayLabel">오늘 업무를 확인하는 중</small></div><button class="icon" onclick="showTab('settings')">⚙</button></header>
+<header class="topbar"><div class="brand"><span class="brand-mark">🔥</span><div><b>119파이어 비서 <em>V2</em></b><small id="todayLabel">현장과 통화를 정리하는 중</small></div></div><button class="icon" aria-label="설정" onclick="showTab('settings')">⚙</button></header>
 <main>
   <section id="home" class="tab active">
-    <div class="hero"><span class="pill">개인용 완전자동 업무비서 V2</span><h1>전화 받고, 현장 가고,<br>끝났다고만 말하세요.</h1><p id="briefing">오늘 업무를 불러오는 중입니다.</p></div>
-    <button class="voice-cta" onclick="startVoice()"><span>🎙</span><div><b>119비서에게 말하기</b><small>운전 중에는 버튼을 누르고 짧게 말하세요</small></div></button>
-    <button class="organize" onclick="organizeToday()">✨ 오늘 거 알아서 정리해 <small>통화·현장·사진·할 일을 점검</small></button>
-    <div class="metrics" id="metrics"></div>
-    <h2>지금 먼저 할 일</h2><div id="priorityTasks"></div>
-    <h2>최근 현장·통화</h2><div id="recentWork"></div>
+    <div class="home-greeting"><span class="badge">개인용 현장 업무비서</span><h1><span id="greetingName">문병민님</span><br>오늘도 안전한 하루 되세요!</h1><p id="briefing">오늘 업무를 불러오는 중입니다.</p></div>
+    <section class="dashboard-card"><div class="section-title"><h2>오늘의 업무</h2><button onclick="showTab('inquiries')">전체보기 ›</button></div><div class="metrics" id="metrics"></div></section>
+    <section class="dashboard-card"><div class="section-title"><h2>오늘 일정·우선 업무</h2><button onclick="showTab('assistant')">비서에게 묻기 ›</button></div><div id="priorityTasks"></div></section>
+    <section class="dashboard-card recent"><div class="section-title"><h2>최근 현장·통화</h2><button onclick="showTab('sites')">현장 보기 ›</button></div><div id="recentWork"></div></section>
+    <button class="voice-cta" onclick="startVoice()"><span>🎙</span><div><b>119비서에게 말하기</b><small>누르고 말하면 업무 기록을 찾아 답해드려요</small></div><i>›</i></button>
+    <button class="organize" onclick="organizeToday()"><span>✦</span> 오늘 거 알아서 정리해 <small>통화 · 현장 · 사진 · 미처리 업무 점검</small></button>
   </section>
   <section id="inquiries" class="tab">
     <div class="pagehead"><h1>문의</h1><p>전화번호를 기준으로 기존 고객과 연결합니다.</p></div>
