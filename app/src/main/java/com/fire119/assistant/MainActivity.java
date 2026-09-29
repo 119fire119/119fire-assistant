@@ -25,6 +25,10 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Toast;
 
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
 import androidx.core.content.FileProvider;
 import androidx.documentfile.provider.DocumentFile;
 import androidx.work.ExistingPeriodicWorkPolicy;
@@ -65,6 +69,8 @@ public class MainActivity extends Activity {
     private SpeechRecognizer speechRecognizer;
     private File pendingPhoto;
     private String pendingJobName = "미지정 현장";
+    private int systemTopInset = 0;
+    private int systemBottomInset = 0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -76,7 +82,19 @@ public class MainActivity extends Activity {
             if (status == TextToSpeech.SUCCESS) textToSpeech.setLanguage(Locale.KOREAN);
         });
         webView = new WebView(this);
+        // Android 15 can draw WebView content behind the status/navigation bars.  Keep the red
+        // header background there, but pass the real inset to CSS so brand text is never hidden.
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
         setContentView(webView);
+
+        ViewCompat.setOnApplyWindowInsetsListener(webView, (view, insets) -> {
+            Insets bars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
+            systemTopInset = bars.top;
+            systemBottomInset = bars.bottom;
+            applySystemInsetsToPage();
+            return insets;
+        });
+        ViewCompat.requestApplyInsets(webView);
 
         WebSettings s = webView.getSettings();
         s.setJavaScriptEnabled(true);
@@ -85,10 +103,23 @@ public class MainActivity extends Activity {
         s.setAllowContentAccess(true);
         s.setMediaPlaybackRequiresUserGesture(true);
 
-        webView.setWebViewClient(new WebViewClient());
+        webView.setWebViewClient(new WebViewClient() {
+            @Override public void onPageFinished(WebView view, String url) {
+                super.onPageFinished(view, url);
+                applySystemInsetsToPage();
+            }
+        });
         webView.setWebChromeClient(new WebChromeClient());
         webView.addJavascriptInterface(new NativeBridge(), "Native");
         webView.loadUrl("file:///android_asset/index.html");
+    }
+
+    private void applySystemInsetsToPage() {
+        if (webView == null) return;
+        final String script = "document.documentElement.style.setProperty('--safe-top','" +
+                systemTopInset + "px');document.documentElement.style.setProperty('--safe-bottom','" +
+                systemBottomInset + "px');";
+        webView.post(() -> webView.evaluateJavascript(script, null));
     }
 
     private void callJs(String fn, JSONObject payload) {

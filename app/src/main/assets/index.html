@@ -17,7 +17,7 @@
   </section>
   <section id="inquiries" class="tab">
     <div class="pagehead"><h1>문의</h1><p>전화번호를 기준으로 기존 고객과 연결합니다.</p></div>
-    <button class="primary" onclick="toggleForm('inquiryForm')">＋ 신규 문의</button>
+    <button class="primary" onclick="toggleForm('inquiryForm')">＋ 신규 문의 등록</button>
     <form id="inquiryForm" class="card form hidden" onsubmit="saveInquiry(event)">
       <label>고객명 <small>이름이 확실할 때만</small></label><input id="customerName" placeholder="이름 미확인 가능">
       <label>전화번호</label><input id="customerPhone" inputmode="tel" placeholder="010-0000-0000">
@@ -31,20 +31,20 @@
   </section>
   <section id="sites" class="tab">
     <div class="pagehead"><h1>현장</h1><p>사진·작업기록·견적·수금을 한 현장에 연결합니다.</p></div>
-    <div class="card"><label>현재 현장명</label><input id="currentJob" placeholder="예: 나주 ○○현장"><div class="two"><button class="primary" type="button" onclick="takePhoto()">📷 현장 촬영</button><button class="secondary" type="button" onclick="saveVoiceMemo()">🎙 음성 메모</button></div><small>사진은 공사 전·중·후·기타로 나중에 분류할 수 있습니다.</small></div>
+    <div class="card"><label>현재 현장명</label><input id="currentJob" placeholder="예: 나주 ○○현장"><div class="two"><button class="primary" type="button" onclick="takePhoto()">📷 현장 촬영</button><button class="secondary" type="button" onclick="saveVoiceMemo()">🎙 음성 메모</button></div><p>사진은 공사 전·중·후·기타로 나중에 분류할 수 있습니다.</p></div>
     <div class="card finish"><b>“끝났어” 자동마감</b><p>사진 누락·작업기록·수금 확인 후보를 만들고, 중요한 완료 상태는 직접 확인합니다.</p><select id="finishSiteSelect"></select><textarea id="finishNote" placeholder="실제로 한 작업만 짧게 기록하세요."></textarea><button class="primary" onclick="finishSite()">현장 끝났어</button></div>
     <h2>현장 목록</h2><div id="siteList"></div><h2>최근 사진</h2><div id="photoList"></div>
   </section>
   <section id="estimates" class="tab">
     <div class="pagehead"><h1>견적</h1><p>저장한 단가만 사용합니다. AI가 단가를 임의로 만들지 않습니다.</p></div>
-    <form class="card form" onsubmit="saveEstimate(event)"><label>견적 제목</label><input id="estimateTitle" placeholder="예: 나주 ○○체육관 감지기 교체"><div id="estimateRows"></div><button class="secondary" type="button" onclick="addEstimateRow()">＋ 항목 추가</button><div class="totals"><span>공급가액 <b id="supplyTotal">0원</b></span><span>부가세 <b id="vatTotal">0원</b></span><strong>합계 <b id="grandTotal">0원</b></strong></div><button class="primary">견적 초안 저장</button></form>
+    <form class="card form" onsubmit="saveEstimate(event)"><label>견적 제목</label><input id="estimateTitle" placeholder="예: 나주 ○○체육관 감지기 교체"><div class="estimate-table-head"><span>항목</span><span>수량</span><span>단가</span><span></span></div><div id="estimateRows"></div><button class="secondary" type="button" onclick="addEstimateRow()">＋ 항목 추가</button><div class="totals"><span>공급가액 <b id="supplyTotal">0원</b></span><span>부가세 <b id="vatTotal">0원</b></span><strong>합계 <b id="grandTotal">0원</b></strong></div><button class="primary">견적 초안 저장</button></form>
     <div class="notice">최종 금액 확정·고객 발송은 자동으로 하지 않습니다.</div><div id="estimateList"></div>
   </section>
   <section id="assistant" class="tab">
     <div class="pagehead"><h1>119 비서</h1><p>저장된 기록만 찾아 답합니다. 없는 사실은 “확인 필요”로 남깁니다.</p></div>
     <div class="chips"><button onclick="quickAsk('지금 뭐부터 해야 돼?')">지금 뭐부터?</button><button onclick="quickAsk('오늘 거 알아서 정리해')">오늘 정리</button><button onclick="quickAsk('견적 보내고 답 없는 사람 있어?')">회신대기</button><button onclick="quickAsk('돈 아직 안 받은 현장 알려줘')">미수금</button></div>
-    <button class="voice-cta small" onclick="startVoice()">🎙 119비서에게 말하기</button><div id="chat" class="chat"></div><textarea id="askText" placeholder="예: 김 사장 마지막 통화 뭐였지?"></textarea><button class="primary" onclick="askAssistant()">보내기</button>
-    <div class="card"><b>새 통화 자동 정리</b><p id="recordingInfo">삼성 통화녹음 폴더를 1회 연결하면 새 파일을 중복 없이 대기열에 넣습니다.</p><div class="two"><button class="secondary" onclick="Native.pickCallFolder()">녹음 폴더 연결</button><button class="secondary" onclick="scanRecordings()">지금 확인</button></div><button class="secondary" onclick="processPendingCalls()">대기 통화 AI 분석</button><small>Android 정책상 SAF 폴더의 완전 실시간 감지는 보장할 수 없어, WorkManager 주기 확인과 수동 즉시 확인을 함께 사용합니다.</small></div>
+    <button class="voice-cta small" onclick="startVoice()">🎙 119비서에게 말하기</button><div class="assistant-shell"><div id="chat" class="chat"></div><div class="chat-compose"><textarea id="askText" placeholder="예: 김 사장 마지막 통화 뭐였지?"></textarea><button class="primary" onclick="askAssistant()">보내기</button></div><p class="assistant-note">저장된 기록을 기준으로 답합니다. 없는 사실은 확인 필요로 남깁니다.</p></div>
+    <div class="card recording-card"><b>새 통화 자동 정리</b><p id="recordingInfo">삼성 통화녹음 폴더를 1회 연결하면 새 파일을 중복 없이 대기열에 넣습니다.</p><div class="two"><button class="secondary" onclick="Native.pickCallFolder()">녹음 폴더 연결</button><button class="secondary" onclick="scanRecordings()">지금 확인</button></div><button class="secondary" onclick="processPendingCalls()">대기 통화 AI 분석</button><p>Android 정책상 SAF 폴더의 완전 실시간 감지는 보장할 수 없어, 주기 확인과 수동 즉시 확인을 함께 사용합니다.</p></div>
   </section>
   <section id="settings" class="tab">
     <div class="pagehead"><h1>설정</h1><p>업무에 필요한 것만 간단히 설정합니다.</p></div>
