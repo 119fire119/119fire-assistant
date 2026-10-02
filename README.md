@@ -27,8 +27,8 @@ V3의 기준은 **사용자가 입력하기보다, 앱이 실제 업무 자료�
 1. **통화녹음 자동 확인**: 앱 설정에서 삼성 기본 통화녹음 폴더를 선택합니다.
 2. **전화기록 자동 연결**: `READ_CALL_LOG` 권한을 허용합니다. 통화 내용이나 녹음은 이 권한만으로 전송하지 않습니다.
 3. **삼성 카메라 사진 자동 확인**: 사진 권한을 허용합니다. 원본은 삭제·이동하지 않으며, 새 `DCIM/Camera` 사진 메타데이터만 읽습니다.
-4. **AI 서버**: Netlify 주소와 `APP_ACCESS_CODE`만 앱에 입력합니다. OpenAI API Key는 APK에 넣지 않습니다.
-5. **Google Drive**: [Google Drive OAuth 설정](docs/GOOGLE_DRIVE_OAUTH.md)을 한 번 완료한 뒤 연결합니다.
+4. **AI 비서 연결**: 설정 → `AI 비서 연결`에서 Netlify 주소와 `APP_ACCESS_CODE`만 저장한 뒤 `AI 연결 확인`을 누릅니다. OpenAI API Key는 APK에 넣지 않습니다.
+5. **Google Drive 연결**: 설정 → `Google Drive 연결`에서 AI 서버 연결을 함께 쓰거나, 필요하면 Drive 전용 서버 주소·접속 코드를 따로 저장합니다. [Google Drive OAuth 설정](docs/GOOGLE_DRIVE_OAUTH.md)을 한 번 완료한 뒤 `실제 연결 확인`을 누릅니다.
 
 ## Google Drive 원칙
 

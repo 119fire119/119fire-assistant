@@ -43,7 +43,9 @@ public final class DrivePhotoUploadWorker extends Worker {
         if(photo==null||photo.siteId==null) return Result.success();
         WorkDatabase.Site site=store.siteById(photo.siteId); if(site==null) return Result.success();
         SharedPreferences prefs=context.getSharedPreferences("119fire_native",Context.MODE_PRIVATE);
-        String base=prefs.getString("server_base","").trim(), code=prefs.getString("app_access_code","");
+        boolean useAi=prefs.getBoolean("drive_use_ai_connection",true);
+        String base=(useAi?prefs.getString("server_base",""):prefs.getString("drive_server_base","")).trim();
+        String code=useAi?prefs.getString("app_access_code",""):prefs.getString("drive_access_code","");
         if(!prefs.getBoolean("drive_backup_enabled",false)||base.isEmpty()||code.isEmpty()) return Result.success();
         try {
             String target=trimBase(base)+"/.netlify/functions/drive";

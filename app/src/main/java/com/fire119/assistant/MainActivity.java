@@ -167,6 +167,16 @@ public class MainActivity extends Activity {
             o.put("calendarConnected", prefs.getBoolean("calendar_enabled", false));
             o.put("driveBackup", prefs.getBoolean("drive_backup_enabled", false));
             o.put("driveLastStatus", prefs.getString("drive_last_status", "연결 확인 전"));
+            String aiBase = prefs.getString("server_base", "").trim();
+            String aiCode = prefs.getString("app_access_code", "");
+            boolean driveUseAi = prefs.getBoolean("drive_use_ai_connection", true);
+            o.put("aiServerBase", aiBase);
+            o.put("aiConfigured", !aiBase.isEmpty() && !aiCode.isEmpty());
+            o.put("aiLastStatus", prefs.getString("ai_last_status", "AI 연결 정보를 아직 저장하지 않았습니다."));
+            o.put("driveUseAiConnection", driveUseAi);
+            o.put("driveServerBase", prefs.getString("drive_server_base", "").trim());
+            o.put("driveConfigured", driveUseAi ? (!aiBase.isEmpty() && !aiCode.isEmpty()) :
+                    (!prefs.getString("drive_server_base", "").trim().isEmpty() && !prefs.getString("drive_access_code", "").isEmpty()));
             o.put("callHistoryEnabled", prefs.getBoolean("call_history_enabled", false));
             o.put("callHistoryGranted", checkSelfPermission(Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED);
             o.put("photoSyncEnabled", prefs.getBoolean("photo_sync_enabled", false));
@@ -405,9 +415,11 @@ public class MainActivity extends Activity {
             new Thread(() -> {
                 JSONObject out = new JSONObject();
                 try {
-                    String url = normalizeBase(serverBase) + "/.netlify/functions/assistant";
+                    String effectiveBase = serverBase == null || serverBase.trim().isEmpty() ? prefs.getString("server_base", "") : serverBase;
+                    String effectiveCode = accessCode == null || accessCode.trim().isEmpty() ? prefs.getString("app_access_code", "") : accessCode;
+                    String url = normalizeBase(effectiveBase) + "/.netlify/functions/assistant";
                     JSONObject body = new JSONObject();
-                    body.put("code", accessCode);
+                    body.put("code", effectiveCode);
                     body.put("message", message);
                     body.put("context", new JSONObject(contextJson == null || contextJson.isEmpty() ? "{}" : contextJson));
                     String resp = postJson(url, body.toString());
@@ -834,9 +846,9 @@ public class MainActivity extends Activity {
             new Thread(() -> {
                 JSONObject out = new JSONObject();
                 try {
-                    String base = normalizeBase(prefs.getString("server_base", ""));
-                    String code = prefs.getString("app_access_code", "");
-                    if (code.isEmpty()) throw new Exception("AI 서버 주소와 앱 접속 코드를 먼저 저장해주세요.");
+                    String base = normalizeBase(resolveDriveBase());
+                    String code = resolveDriveCode();
+                    if (code.isEmpty()) throw new Exception("Drive 서버 주소와 접속 코드를 먼저 저장해주세요.");
                     JSONObject server = new JSONObject(postDriveStatus(base + "/.netlify/functions/drive", code));
                     if (!server.optBoolean("connected", false)) throw new Exception(server.optString("error", "Google Drive 연결을 확인하지 못했습니다."));
                     prefs.edit().putString("drive_last_status", "Google Drive 연결 완료").apply();
@@ -853,8 +865,45 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public void saveServerConnection(String serverBase, String accessCode) {
+            saveAiConnection(serverBase, accessCode);
+        }
+
+        @JavascriptInterface
+        public void saveAiConnection(String serverBase, String accessCode) {
             prefs.edit().putString("server_base", serverBase == null ? "" : serverBase.trim())
-                    .putString("app_access_code", accessCode == null ? "" : accessCode.trim()).apply();
+                    .putString("app_access_code", accessCode == null ? "" : accessCode.trim())
+                    .putString("ai_last_status", "AI 연결 정보 저장됨 · 실제 연결 확인을 눌러주세요.").apply();
+        }
+
+        @JavascriptInterface
+        public void saveDriveConnection(String serverBase, String accessCode, boolean useAiConnection) {
+            prefs.edit().putBoolean("drive_use_ai_connection", useAiConnection)
+                    .putString("drive_server_base", serverBase == null ? "" : serverBase.trim())
+                    .putString("drive_access_code", accessCode == null ? "" : accessCode.trim())
+                    .putString("drive_last_status", "Drive 연결 정보 저장됨 · 실제 연결 확인을 눌러주세요.").apply();
+        }
+
+        @JavascriptInterface
+        public void testAiConnection() {
+            new Thread(() -> {
+                JSONObject out = new JSONObject();
+                try {
+                    String base = normalizeBase(prefs.getString("server_base", ""));
+                    String code = prefs.getString("app_access_code", "");
+                    if (code.isEmpty()) throw new Exception("AI 서버 주소와 앱 접속 코드를 먼저 저장해주세요.");
+                    JSONObject body = new JSONObject();
+                    body.put("code", code); body.put("message", "연결 상태만 짧게 확인해줘."); body.put("context", new JSONObject());
+                    JSONObject response = new JSONObject(postJson(base + "/.netlify/functions/assistant", body.toString()));
+                    if (response.optString("reply", "").trim().isEmpty()) throw new Exception("AI 응답이 비어 있습니다.");
+                    prefs.edit().putString("ai_last_status", "AI 연결 완료").apply();
+                    out.put("ok", true); out.put("message", "AI 연결이 확인됐습니다.");
+                } catch (Exception e) {
+                    String message = e.getMessage() == null ? "AI 연결을 확인하지 못했습니다." : e.getMessage();
+                    prefs.edit().putString("ai_last_status", message).apply();
+                    try { out.put("ok", false); out.put("error", message); } catch (Exception ignored) { }
+                }
+                callJs("onAiConnection", out);
+            }).start();
         }
 
         /** Sends only files that are in the local queue. The OpenAI key never leaves Netlify. */
@@ -1206,6 +1255,19 @@ public class MainActivity extends Activity {
         while (b.endsWith("/")) b = b.substring(0, b.length()-1);
         if (!b.startsWith("https://")) throw new Exception("서버 주소는 https:// 주소여야 합니다.");
         return b;
+    }
+
+    /** Drive can share the AI gateway or use a separately stored gateway. */
+    private String resolveDriveBase() {
+        return prefs.getBoolean("drive_use_ai_connection", true)
+                ? prefs.getString("server_base", "")
+                : prefs.getString("drive_server_base", "");
+    }
+
+    private String resolveDriveCode() {
+        return prefs.getBoolean("drive_use_ai_connection", true)
+                ? prefs.getString("app_access_code", "")
+                : prefs.getString("drive_access_code", "");
     }
 
     /** Queues only linked local photos that have not received a Drive file ID. */
