@@ -166,6 +166,7 @@ public class MainActivity extends Activity {
             o.put("voiceReply", prefs.getBoolean("voice_reply", true));
             o.put("calendarConnected", prefs.getBoolean("calendar_enabled", false));
             o.put("driveBackup", prefs.getBoolean("drive_backup_enabled", false));
+            o.put("driveLastStatus", prefs.getString("drive_last_status", "연결 확인 전"));
             o.put("callHistoryEnabled", prefs.getBoolean("call_history_enabled", false));
             o.put("callHistoryGranted", checkSelfPermission(Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED);
             o.put("photoSyncEnabled", prefs.getBoolean("photo_sync_enabled", false));
@@ -821,8 +822,33 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public String setDriveBackup(boolean enabled) {
             prefs.edit().putBoolean("drive_backup_enabled", enabled).apply();
-            if (enabled) AutomationLog.add(MainActivity.this, "Google Drive 사진 업로드 대기열을 켰습니다.");
-            return result(true, enabled ? "Drive 업로드 대기열을 켰습니다. OAuth 설정 전 사진은 연결 대기로 남습니다." : "Drive 업로드 대기열을 껐습니다.", 0).toString();
+            if (!enabled) return result(true, "Drive 업로드 대기열을 껐습니다.", 0).toString();
+            int queued = enqueuePendingDrivePhotos();
+            AutomationLog.add(MainActivity.this, "Google Drive 사진 업로드 대기열을 켰습니다.");
+            return result(true, "Drive 업로드 대기열을 켰습니다. 기존 연결 사진 " + queued + "장을 다시 확인합니다. OAuth 설정 전 사진은 연결 대기로 남습니다.", 0).toString();
+        }
+
+        /** Tests the actual Netlify + Google OAuth connection; a UI toggle is not a connection. */
+        @JavascriptInterface
+        public void checkDriveConnection() {
+            new Thread(() -> {
+                JSONObject out = new JSONObject();
+                try {
+                    String base = normalizeBase(prefs.getString("server_base", ""));
+                    String code = prefs.getString("app_access_code", "");
+                    if (code.isEmpty()) throw new Exception("AI 서버 주소와 앱 접속 코드를 먼저 저장해주세요.");
+                    JSONObject server = new JSONObject(postDriveStatus(base + "/.netlify/functions/drive", code));
+                    if (!server.optBoolean("connected", false)) throw new Exception(server.optString("error", "Google Drive 연결을 확인하지 못했습니다."));
+                    prefs.edit().putString("drive_last_status", "Google Drive 연결 완료").apply();
+                    int queued = enqueuePendingDrivePhotos();
+                    out.put("ok", true); out.put("message", "Google Drive 연결이 확인됐습니다. 대기 사진 " + queued + "장을 업로드합니다.");
+                } catch (Exception e) {
+                    String message = e.getMessage() == null ? "Google Drive 연결을 확인하지 못했습니다." : e.getMessage();
+                    prefs.edit().putString("drive_last_status", message).apply();
+                    try { out.put("ok", false); out.put("error", message); } catch (Exception ignored) {}
+                }
+                callJs("onDriveConnection", out);
+            }).start();
         }
 
         @JavascriptInterface
@@ -901,13 +927,17 @@ public class MainActivity extends Activity {
             try {
                 WorkDatabase.CallRecord call = database.store().callById(callId);
                 if (call == null) return result(false, "통화기록을 찾지 못했습니다.", callId).toString();
-                boolean hasTranscript = call.transcript != null && !call.transcript.trim().isEmpty();
-                JSONObject out = result(true, hasTranscript ? "AI 전사 내용을 확인하세요." : "이 통화는 녹음 전사가 아직 연결되지 않았습니다.", callId);
+                WorkDatabase.CallRecord linked = CallRecordingLinker.find(database.store(), call);
+                WorkDatabase.CallRecord content = linked != null && linked.transcript != null && !linked.transcript.trim().isEmpty() ? linked : call;
+                boolean hasTranscript = content.transcript != null && !content.transcript.trim().isEmpty();
+                boolean linkedRecording = linked != null && linked.id != call.id;
+                JSONObject out = result(true, hasTranscript ? "연결된 AI 전사 내용을 확인하세요." : "이 통화의 녹음 전사가 아직 준비되지 않았습니다.", callId);
                 out.put("id", call.id); out.put("name", call.displayName); out.put("phone", call.phone);
-                out.put("when", call.modifiedAt); out.put("status", call.processingStatus); out.put("summary", call.summary);
-                out.put("transcript", hasTranscript ? call.transcript : ""); out.put("hasTranscript", hasTranscript);
+                out.put("when", call.modifiedAt); out.put("status", content.processingStatus); out.put("summary", hasTranscript ? content.summary : call.summary);
+                out.put("transcript", hasTranscript ? content.transcript : ""); out.put("hasTranscript", hasTranscript);
                 out.put("kind", call.sourceUri.startsWith("calllog:") ? "전화기록" : "통화녹음");
-                out.put("documentHint", hasTranscript ? "전사와 요약을 PDF 통화기록으로 저장할 수 있습니다." : "전화기록만으로는 통화 내용을 알 수 없습니다. 같은 통화의 삼성 녹음파일을 연결하고 AI 분석하면 발언내용을 문서로 만들 수 있습니다.");
+                out.put("linkedRecording", linkedRecording);
+                out.put("documentHint", hasTranscript ? (linkedRecording ? "같은 시각의 삼성 녹음 전사를 연결했습니다. 전사와 요약을 PDF 통화기록으로 저장할 수 있습니다." : "전사와 요약을 PDF 통화기록으로 저장할 수 있습니다.") : "전화기록만으로는 통화 내용을 알 수 없습니다. 삼성 녹음파일의 AI 분석이 완료되면 같은 시각의 기록에 자동으로 표시됩니다.");
                 return out.toString();
             } catch (Exception e) { return result(false, "통화 상세를 불러오지 못했습니다.", callId).toString(); }
         }
@@ -919,6 +949,8 @@ public class MainActivity extends Activity {
             try {
                 WorkDatabase.CallRecord call = database.store().callById(callId);
                 if (call == null) return result(false, "통화기록을 찾지 못했습니다.", callId).toString();
+                WorkDatabase.CallRecord linked = CallRecordingLinker.find(database.store(), call);
+                WorkDatabase.CallRecord content = linked != null && linked.transcript != null && !linked.transcript.trim().isEmpty() ? linked : call;
                 PdfDocument.Page page = pdf.startPage(new PdfDocument.PageInfo.Builder(595, 842, 1).create());
                 Canvas canvas = page.getCanvas(); Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
                 paint.setColor(0xff191b1f); paint.setTextSize(23); paint.setFakeBoldText(true);
@@ -933,10 +965,10 @@ public class MainActivity extends Activity {
                 y = drawPdfText(canvas, paint, "기록 종류: " + (call.sourceUri.startsWith("calllog:") ? "전화기록" : "삼성 통화녹음"), 42, y, 510, 15);
                 paint.setFakeBoldText(true); paint.setTextSize(13); y += 16; canvas.drawText("요약", 42, y, paint); y += 18;
                 paint.setFakeBoldText(false); paint.setTextSize(11);
-                y = drawPdfText(canvas, paint, valueOr(call.summary, "요약 확인 필요"), 42, y, 510, 15);
+                y = drawPdfText(canvas, paint, valueOr(content.summary, "요약 확인 필요"), 42, y, 510, 15);
                 paint.setFakeBoldText(true); paint.setTextSize(13); y += 14; canvas.drawText("통화 내용", 42, y, paint); y += 18;
                 paint.setFakeBoldText(false); paint.setTextSize(11);
-                String transcript = call.transcript == null ? "" : call.transcript.trim();
+                String transcript = content.transcript == null ? "" : content.transcript.trim();
                 String body = transcript.isEmpty()
                         ? "삼성 통화녹음 전사가 아직 연결되지 않았습니다. 전화기록만으로 실제 대화 내용을 작성하지 않습니다."
                         : transcript;
@@ -1174,6 +1206,35 @@ public class MainActivity extends Activity {
         while (b.endsWith("/")) b = b.substring(0, b.length()-1);
         if (!b.startsWith("https://")) throw new Exception("서버 주소는 https:// 주소여야 합니다.");
         return b;
+    }
+
+    /** Queues only linked local photos that have not received a Drive file ID. */
+    private int enqueuePendingDrivePhotos() {
+        int queued = 0;
+        try {
+            for (WorkDatabase.Photo photo : database.store().photos(500)) {
+                if (photo.siteId == null || (photo.driveFileId != null && !photo.driveFileId.trim().isEmpty())) continue;
+                DrivePhotoUploadWorker.enqueue(MainActivity.this, photo.id);
+                queued++;
+            }
+        } catch (Exception ignored) { }
+        return queued;
+    }
+
+    private String postDriveStatus(String urlString, String accessCode) throws Exception {
+        String boundary = "----119FireDriveStatus" + System.currentTimeMillis();
+        HttpURLConnection c = (HttpURLConnection) new URL(urlString).openConnection();
+        c.setRequestMethod("POST"); c.setConnectTimeout(20000); c.setReadTimeout(90000); c.setDoOutput(true);
+        c.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
+        c.setRequestProperty("X-App-Code", accessCode == null ? "" : accessCode);
+        try (DataOutputStream out = new DataOutputStream(c.getOutputStream())) {
+            out.writeBytes("--" + boundary + "\r\nContent-Disposition: form-data; name=\"action\"\r\n\r\nstatus\r\n--" + boundary + "--\r\n");
+            out.flush();
+        }
+        int code = c.getResponseCode();
+        String text = readAll(code >= 200 && code < 300 ? c.getInputStream() : c.getErrorStream());
+        if (code < 200 || code >= 300) throw new Exception(extractError(text, code == 404 ? "Drive 서버 기능이 아직 배포되지 않았습니다." : "Google Drive 연결 오류 (" + code + ")"));
+        return text;
     }
 
     private String postJson(String urlString, String json) throws Exception {

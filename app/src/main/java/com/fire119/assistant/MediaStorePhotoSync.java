@@ -28,7 +28,11 @@ public final class MediaStorePhotoSync {
     public static int sync(Context context) throws SecurityException {
         if (!hasPermission(context)) throw new SecurityException("사진 접근 권한이 필요합니다.");
         SharedPreferences prefs = context.getSharedPreferences("119fire_native", Context.MODE_PRIVATE);
+        // First sync must inspect the newest images. Oldest-first scanning could reach its
+        // safety limit and then mark newer field photos as already seen.
         long last = prefs.getLong("photo_last_seen", 0L);
+        if (last <= 0L) last = Math.max(0L, System.currentTimeMillis() - 30L * 24L * 60L * 60L * 1000L);
+        long queryFrom = Math.max(0L, last - 3000L);
         long newest = last;
         int imported = 0;
         WorkDatabase.Store store = WorkDatabase.get(context).store();
@@ -39,9 +43,9 @@ public final class MediaStorePhotoSync {
                 MediaStore.Images.Media.SIZE, pathColumn};
         String selection = "(" + MediaStore.Images.Media.DATE_TAKEN + ">? OR " +
                 MediaStore.Images.Media.DATE_MODIFIED + ">?)";
-        String[] args = {String.valueOf(last), String.valueOf(last / 1000L)};
+        String[] args = {String.valueOf(queryFrom), String.valueOf(queryFrom / 1000L)};
         try (Cursor cursor = context.getContentResolver().query(MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
-                projection, selection, args, MediaStore.Images.Media.DATE_TAKEN + " ASC")) {
+                projection, selection, args, MediaStore.Images.Media.DATE_TAKEN + " DESC")) {
             if (cursor == null) return 0;
             int idIx = cursor.getColumnIndexOrThrow(MediaStore.Images.Media._ID);
             int nameIx = cursor.getColumnIndexOrThrow(MediaStore.Images.Media.DISPLAY_NAME);
@@ -83,7 +87,7 @@ public final class MediaStorePhotoSync {
                 newest = Math.max(newest, taken);
             }
         }
-        prefs.edit().putLong("photo_last_seen", Math.max(newest, System.currentTimeMillis() - 1000L)).apply();
+        prefs.edit().putLong("photo_last_seen", newest).apply();
         if (imported > 0) AutomationLog.add(context, "삼성 카메라 새 사진 " + imported + "장을 확인했습니다.");
         return imported;
     }
