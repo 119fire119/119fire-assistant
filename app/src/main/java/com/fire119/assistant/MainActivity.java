@@ -175,6 +175,7 @@ public class MainActivity extends Activity {
             o.put("aiLastStatus", prefs.getString("ai_last_status", "AI 연결 정보를 아직 저장하지 않았습니다."));
             o.put("driveUseAiConnection", driveUseAi);
             o.put("driveServerBase", prefs.getString("drive_server_base", "").trim());
+            o.put("driveFolderUrl", prefs.getString("drive_folder_url", "").trim());
             o.put("driveConfigured", driveUseAi ? (!aiBase.isEmpty() && !aiCode.isEmpty()) :
                     (!prefs.getString("drive_server_base", "").trim().isEmpty() && !prefs.getString("drive_access_code", "").isEmpty()));
             o.put("callHistoryEnabled", prefs.getBoolean("call_history_enabled", false));
@@ -849,7 +850,8 @@ public class MainActivity extends Activity {
                     String base = normalizeBase(resolveDriveBase());
                     String code = resolveDriveCode();
                     if (code.isEmpty()) throw new Exception("Drive 서버 주소와 접속 코드를 먼저 저장해주세요.");
-                    JSONObject server = new JSONObject(postDriveStatus(base + "/.netlify/functions/drive", code));
+                    JSONObject server = new JSONObject(postDriveStatus(base + "/.netlify/functions/drive", code,
+                            prefs.getString("drive_root_folder_id", "")));
                     if (!server.optBoolean("connected", false)) throw new Exception(server.optString("error", "Google Drive 연결을 확인하지 못했습니다."));
                     prefs.edit().putString("drive_last_status", "Google Drive 연결 완료").apply();
                     int queued = enqueuePendingDrivePhotos();
@@ -876,10 +878,13 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
-        public void saveDriveConnection(String serverBase, String accessCode, boolean useAiConnection) {
+        public void saveDriveConnection(String serverBase, String accessCode, boolean useAiConnection, String folderUrl) {
+            String folderId = extractDriveFolderId(folderUrl);
             prefs.edit().putBoolean("drive_use_ai_connection", useAiConnection)
                     .putString("drive_server_base", serverBase == null ? "" : serverBase.trim())
                     .putString("drive_access_code", accessCode == null ? "" : accessCode.trim())
+                    .putString("drive_folder_url", folderUrl == null ? "" : folderUrl.trim())
+                    .putString("drive_root_folder_id", folderId)
                     .putString("drive_last_status", "Drive 연결 정보 저장됨 · 실제 연결 확인을 눌러주세요.").apply();
         }
 
@@ -1270,6 +1275,17 @@ public class MainActivity extends Activity {
                 : prefs.getString("drive_access_code", "");
     }
 
+    /** Accepts a normal Google Drive folder URL or an already copied folder ID. */
+    private String extractDriveFolderId(String value) {
+        if (value == null) return "";
+        String raw = value.trim();
+        if (raw.isEmpty()) return "";
+        java.util.regex.Matcher matcher = java.util.regex.Pattern
+                .compile("/folders/([A-Za-z0-9_-]+)").matcher(raw);
+        if (matcher.find()) return matcher.group(1);
+        return raw.matches("[A-Za-z0-9_-]{10,}") ? raw : "";
+    }
+
     /** Queues only linked local photos that have not received a Drive file ID. */
     private int enqueuePendingDrivePhotos() {
         int queued = 0;
@@ -1283,14 +1299,17 @@ public class MainActivity extends Activity {
         return queued;
     }
 
-    private String postDriveStatus(String urlString, String accessCode) throws Exception {
+    private String postDriveStatus(String urlString, String accessCode, String rootFolderId) throws Exception {
         String boundary = "----119FireDriveStatus" + System.currentTimeMillis();
         HttpURLConnection c = (HttpURLConnection) new URL(urlString).openConnection();
         c.setRequestMethod("POST"); c.setConnectTimeout(20000); c.setReadTimeout(90000); c.setDoOutput(true);
         c.setRequestProperty("Content-Type", "multipart/form-data; boundary=" + boundary);
         c.setRequestProperty("X-App-Code", accessCode == null ? "" : accessCode);
         try (DataOutputStream out = new DataOutputStream(c.getOutputStream())) {
-            out.writeBytes("--" + boundary + "\r\nContent-Disposition: form-data; name=\"action\"\r\n\r\nstatus\r\n--" + boundary + "--\r\n");
+            out.writeBytes("--" + boundary + "\r\nContent-Disposition: form-data; name=\"action\"\r\n\r\nstatus\r\n");
+            if (rootFolderId != null && !rootFolderId.trim().isEmpty())
+                out.writeBytes("--" + boundary + "\r\nContent-Disposition: form-data; name=\"rootFolderId\"\r\n\r\n" + rootFolderId.trim() + "\r\n");
+            out.writeBytes("--" + boundary + "--\r\n");
             out.flush();
         }
         int code = c.getResponseCode();

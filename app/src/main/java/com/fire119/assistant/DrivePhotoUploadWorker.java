@@ -46,12 +46,13 @@ public final class DrivePhotoUploadWorker extends Worker {
         boolean useAi=prefs.getBoolean("drive_use_ai_connection",true);
         String base=(useAi?prefs.getString("server_base",""):prefs.getString("drive_server_base","")).trim();
         String code=useAi?prefs.getString("app_access_code",""):prefs.getString("drive_access_code","");
+        String rootFolderId=prefs.getString("drive_root_folder_id","");
         if(!prefs.getBoolean("drive_backup_enabled",false)||base.isEmpty()||code.isEmpty()) return Result.success();
         try {
             String target=trimBase(base)+"/.netlify/functions/drive";
             String date=new SimpleDateFormat("yyyy",Locale.KOREA).format(new Date(photo.createdAt)) + "년도";
             String month=new SimpleDateFormat("M월",Locale.KOREA).format(new Date(photo.createdAt));
-            JSONObject result=new JSONObject(upload(context,target,code,photo.path,photo.name,site.name,date,month));
+            JSONObject result=new JSONObject(upload(context,target,code,photo.path,photo.name,site.name,date,month,rootFolderId));
             String fileId=result.optString("driveFileId",""); String folderId=result.optString("driveFolderId","");
             if(fileId.isEmpty()) throw new IllegalStateException(result.optString("error","Drive 업로드에 실패했습니다."));
             store.updatePhotoBackup(photo.id,"Drive 업로드 완료",fileId);
@@ -66,13 +67,14 @@ public final class DrivePhotoUploadWorker extends Worker {
         }
     }
     private static String trimBase(String value){String out=value;while(out.endsWith("/"))out=out.substring(0,out.length()-1);return out;}
-    private static String upload(Context context,String target,String code,String path,String fileName,String siteName,String year,String month) throws Exception {
+    private static String upload(Context context,String target,String code,String path,String fileName,String siteName,String year,String month,String rootFolderId) throws Exception {
         String boundary="----119FireDrive"+System.currentTimeMillis();
         HttpURLConnection c=(HttpURLConnection)new URL(target).openConnection(); c.setRequestMethod("POST");c.setConnectTimeout(20000);c.setReadTimeout(180000);c.setDoOutput(true);c.setChunkedStreamingMode(64*1024);
         c.setRequestProperty("Content-Type","multipart/form-data; boundary="+boundary);c.setRequestProperty("X-App-Code",code);
         try(DataOutputStream out=new DataOutputStream(c.getOutputStream());InputStream in=open(context,path)){
             if(in==null)throw new IllegalStateException("사진 원본을 읽을 수 없습니다.");
             field(out,boundary,"action","upload-photo");field(out,boundary,"siteName",siteName);field(out,boundary,"year",year);field(out,boundary,"month",month);
+            if(rootFolderId!=null&&!rootFolderId.trim().isEmpty())field(out,boundary,"rootFolderId",rootFolderId.trim());
             out.writeBytes("--"+boundary+"\r\nContent-Disposition: form-data; name=\"file\"; filename=\""+fileName.replace("\"","")+"\"\r\nContent-Type: image/jpeg\r\n\r\n");
             byte[] buffer=new byte[64*1024];int n;while((n=in.read(buffer))>0)out.write(buffer,0,n);out.writeBytes("\r\n--"+boundary+"--\r\n");out.flush();
         }

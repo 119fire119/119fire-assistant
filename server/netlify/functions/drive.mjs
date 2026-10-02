@@ -38,12 +38,19 @@ async function existingFile(token,name,parent){
   const d=await drive(token,`files?q=${q}&fields=files(id,name,webViewLink,parents)&pageSize=2`);
   return d.files?.length===1?d.files[0]:null;
 }
-async function ensureSitePath(token,year,month,siteName){
-  const root=Netlify.env.get("GOOGLE_DRIVE_ROOT_FOLDER_ID")||"";
+async function ensureSitePath(token,year,month,siteName,rootFolderId=""){
+  const root=rootFolderId||Netlify.env.get("GOOGLE_DRIVE_ROOT_FOLDER_ID")||"";
   const y=await ensureFolder(token,safeName(year),root);
   const m=await ensureFolder(token,safeName(month),y.id);
   const site=await ensureFolder(token,safeName(siteName),m.id);
   return {year:y,month:m,site};
+}
+async function verifiedRootFolder(token,requestedId){
+  const id=String(requestedId||Netlify.env.get("GOOGLE_DRIVE_ROOT_FOLDER_ID")||"").trim();
+  if(!id) return "";
+  const folder=await drive(token,`files/${encodeURIComponent(id)}?fields=id,name,mimeType`);
+  if(folder.mimeType!==FOLDER_MIME) throw new Error("입력한 Google Drive 주소가 폴더가 아닙니다.");
+  return folder.id;
 }
 async function upload(token,file,metadata){
   const boundary=`119fire-${Date.now()}`;
@@ -62,9 +69,13 @@ export default async request=>{
   if(!appCode||code!==appCode) return json({error:"앱 접속 코드가 맞지 않습니다."},401);
   let form; try{form=await request.formData();}catch{return json({error:"요청 형식이 올바르지 않습니다."},400);}
   const action=String(form.get("action")||"");
+  const requestedRootId=String(form.get("rootFolderId")||"").trim();
   try{
     const token=await accessToken();
-    if(action==="status") return json({connected:true});
+    if(action==="status") {
+      const root=await verifiedRootFolder(token,requestedRootId);
+      return json({connected:true,rootFolderId:root});
+    }
     if(action==="search"){
       const query=String(form.get("query")||"").trim().replace(/'/g,"\\'");
       if(!query) return json({files:[]});
@@ -76,7 +87,8 @@ export default async request=>{
       const file=form.get("file"); const siteName=safeName(form.get("siteName"));
       const year=safeName(form.get("year")); const month=safeName(form.get("month"));
       if(!file||typeof file.arrayBuffer!=="function"||!siteName||!year||!month) return json({error:"사진 또는 현장 정보가 없습니다."},400);
-      const path=await ensureSitePath(token,year,month,siteName);
+      const root=await verifiedRootFolder(token,requestedRootId);
+      const path=await ensureSitePath(token,year,month,siteName,root);
       const duplicate=await existingFile(token,safeName(file.name)||"현장사진.jpg",path.site.id);
       if(duplicate) return json({driveFileId:duplicate.id,driveFolderId:path.site.id,siteFolderName:path.site.name,deduplicated:true});
       const saved=await upload(token,file,{name:safeName(file.name)||"현장사진.jpg",parents:[path.site.id]});
