@@ -18,7 +18,9 @@ function extract(data){
 export default async (request) => {
   const H={"content-type":"application/json; charset=utf-8","cache-control":"no-store"};
   if(request.method!=="POST") return new Response(JSON.stringify({error:"POST only"}),{status:405,headers:H});
-  const key=Netlify.env.get("OPENAI_API_KEY");
+  // Accept the early V3 setup spelling too. Netlify variable names are
+  // case-sensitive, so this avoids making the owner paste a secret again.
+  const key=Netlify.env.get("OPENAI_API_KEY")||Netlify.env.get("OPENAi_api_key");
   const appCode=Netlify.env.get("APP_ACCESS_CODE");
   const model=Netlify.env.get("OPENAI_MODEL")||"gpt-5";
   if(!key||!appCode) return new Response(JSON.stringify({error:"서버 환경변수 설정이 필요합니다."}),{status:500,headers:H});

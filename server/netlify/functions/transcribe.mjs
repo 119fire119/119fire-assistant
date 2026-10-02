@@ -18,7 +18,8 @@ export default async (request) => {
   const H={"content-type":"application/json; charset=utf-8","cache-control":"no-store"};
   if(request.method!=="POST") return new Response(JSON.stringify({error:"POST only"}),{status:405,headers:H});
 
-  const key=Netlify.env.get("OPENAI_API_KEY");
+  // Backward-compatible with the first V3 Netlify setup spelling.
+  const key=Netlify.env.get("OPENAI_API_KEY")||Netlify.env.get("OPENAi_api_key");
   const appCode=Netlify.env.get("APP_ACCESS_CODE");
   const code=request.headers.get("x-app-code")||"";
   if(!key||!appCode) return new Response(JSON.stringify({error:"서버 환경변수 설정이 필요합니다."}),{status:500,headers:H});

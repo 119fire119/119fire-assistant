@@ -8,7 +8,7 @@ function outputText(data){
 export default async request => {
   const headers={"content-type":"application/json; charset=utf-8","cache-control":"no-store"};
   if(request.method!=="POST") return new Response(JSON.stringify({error:"POST only"}),{status:405,headers});
-  const key=Netlify.env.get("OPENAI_API_KEY"), code=Netlify.env.get("APP_ACCESS_CODE");
+  const key=Netlify.env.get("OPENAI_API_KEY")||Netlify.env.get("OPENAi_api_key"), code=Netlify.env.get("APP_ACCESS_CODE");
   if(!key||!code) return new Response(JSON.stringify({error:"서버 환경변수 설정이 필요합니다."}),{status:500,headers});
   let body={};try{body=await request.json()}catch{}
   if(body.code!==code) return new Response(JSON.stringify({error:"앱 접속 코드가 맞지 않습니다."}),{status:401,headers});
