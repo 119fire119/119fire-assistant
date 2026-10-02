@@ -2,14 +2,16 @@
 <html lang="ko">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-  <title>119파이어 비서 V2</title><link rel="stylesheet" href="styles.css">
+  <title>119파이어 AI 비서 V3</title><link rel="stylesheet" href="styles.css"><link rel="stylesheet" href="v3.css">
 </head>
 <body>
-<header class="topbar"><div class="brand"><span class="brand-mark">🔥</span><div><b>119파이어 비서 <em>V2</em></b><small id="todayLabel">현장과 통화를 정리하는 중</small></div></div><button class="icon" aria-label="설정" onclick="showTab('settings')">⚙</button></header>
+<header class="topbar"><div class="brand"><span class="brand-mark">🔥</span><div><b>119파이어 AI 비서 <em>V3</em></b><small id="todayLabel">현장과 통화를 정리하는 중</small></div></div><button class="icon" aria-label="설정" onclick="showTab('settings')">⚙</button></header>
 <main>
   <section id="home" class="tab active">
     <div class="home-greeting"><span class="badge">개인용 현장 업무비서</span><h1><span id="greetingName">문병민님</span><br>오늘도 안전한 하루 되세요!</h1><p id="briefing">오늘 업무를 불러오는 중입니다.</p></div>
     <section class="dashboard-card"><div class="section-title"><h2>오늘의 업무</h2><button onclick="showTab('inquiries')">전체보기 ›</button></div><div class="metrics" id="metrics"></div></section>
+    <section class="dashboard-card"><div class="section-title"><h2>업무 진행 현황</h2><small>실제 저장 상태 기준</small></div><div class="stage-grid" id="stageGrid"></div></section>
+    <section class="dashboard-card attention"><div class="section-title"><h2>오늘 꼭 볼 것</h2><button onclick="showTab('assistant')">비서에게 묻기 ›</button></div><div id="attentionList"></div></section>
     <section class="dashboard-card"><div class="section-title"><h2>오늘 일정·우선 업무</h2><button onclick="showTab('assistant')">비서에게 묻기 ›</button></div><div id="priorityTasks"></div></section>
     <section class="dashboard-card recent"><div class="section-title"><h2>최근 현장·통화</h2><button onclick="showTab('sites')">현장 보기 ›</button></div><div id="recentWork"></div></section>
     <button class="voice-cta" onclick="startVoice()"><span>🎙</span><div><b>119비서에게 말하기</b><small>누르고 말하면 업무 기록을 찾아 답해드려요</small></div><i>›</i></button>
@@ -19,8 +21,11 @@
     <div class="pagehead"><h1>문의</h1><p>전화번호를 기준으로 기존 고객과 연결합니다.</p></div>
     <button class="primary" onclick="toggleForm('inquiryForm')">＋ 신규 문의 등록</button>
     <form id="inquiryForm" class="card form hidden" onsubmit="saveInquiry(event)">
-      <label>고객명 <small>이름이 확실할 때만</small></label><input id="customerName" placeholder="이름 미확인 가능">
+      <label>업체명</label><input id="customerCompany" placeholder="예: ○○관리사무소">
+      <label>담당자</label><input id="customerName" placeholder="이름 미확인 가능">
+      <label>담당자 직함·메모 <small>확실할 때만</small></label><input id="customerContactName" placeholder="예: 김 사장 / 시설팀">
       <label>전화번호</label><input id="customerPhone" inputmode="tel" placeholder="010-0000-0000">
+      <label>지역</label><input id="customerRegion" placeholder="예: 나주 / 광주">
       <label>현장명</label><input id="siteName" placeholder="예: 나주 ○○체육관">
       <label>주소</label><input id="siteAddress" placeholder="확실한 주소만 입력">
       <label>문의 내용</label><textarea id="inquiryContent" required placeholder="고객이 실제로 말한 증상·요청"></textarea>
@@ -32,12 +37,13 @@
   <section id="sites" class="tab">
     <div class="pagehead"><h1>현장</h1><p>사진·작업기록·견적·수금을 한 현장에 연결합니다.</p></div>
     <div class="card"><label>현재 현장명</label><input id="currentJob" placeholder="예: 나주 ○○현장"><div class="two"><button class="primary" type="button" onclick="takePhoto()">📷 현장 촬영</button><button class="secondary" type="button" onclick="saveVoiceMemo()">🎙 음성 메모</button></div><p>촬영 즉시 현장 폴더와 기록에 저장됩니다. 사진은 공사 전·중·후·기타로 나중에 분류할 수 있습니다.</p></div>
-    <div class="card finish"><b>“끝났어” 자동마감</b><p>사진 누락·작업기록·수금 확인 후보를 만들고, 중요한 완료 상태는 직접 확인합니다.</p><select id="finishSiteSelect"></select><textarea id="finishNote" placeholder="실제로 한 작업만 짧게 기록하세요."></textarea><button class="primary" onclick="finishSite()">현장 끝났어</button></div>
+    <div class="card finish"><b>“끝났어” 마감 확인</b><p>사진·작업기록·수금·블로그 준비도를 먼저 확인합니다. 공사완료는 마지막 확인을 눌러야 저장됩니다.</p><select id="finishSiteSelect"></select><textarea id="finishNote" placeholder="실제로 한 작업만 짧게 기록하세요."></textarea><button class="primary" onclick="finishSite()">현장 끝났어</button></div>
     <h2>현장 목록</h2><div id="siteList"></div><h2>최근 사진</h2><div id="photoList"></div>
   </section>
   <section id="estimates" class="tab">
     <div class="pagehead"><h1>견적</h1><p>저장한 단가만 사용합니다. AI가 단가를 임의로 만들지 않습니다.</p></div>
-    <form class="card form" onsubmit="saveEstimate(event)"><label>견적 제목</label><input id="estimateTitle" placeholder="예: 나주 ○○체육관 감지기 교체"><div class="estimate-table-head"><span>항목</span><span>수량</span><span>단가</span><span></span></div><div id="estimateRows"></div><button class="secondary" type="button" onclick="addEstimateRow()">＋ 항목 추가</button><div class="totals"><span>공급가액 <b id="supplyTotal">0원</b></span><span>부가세 <b id="vatTotal">0원</b></span><strong>합계 <b id="grandTotal">0원</b></strong></div><button class="primary">견적 초안 저장</button></form>
+    <form class="card form" onsubmit="saveEstimate(event)"><label>견적 제목</label><input id="estimateTitle" placeholder="예: 나주 ○○체육관 감지기 교체"><div id="favoriteItems" class="quick-items"></div><div class="estimate-table-head"><span>품목</span><span>규격</span><span>수량</span><span>단가</span><span></span></div><div id="estimateRows"></div><button class="secondary" type="button" onclick="addEstimateRow()">＋ 항목 추가</button><label>특기사항</label><textarea id="estimateNote" placeholder="저장된 특기사항을 누르면 여기에 삽입됩니다."></textarea><div id="estimateNotes" class="quick-items"></div><div class="totals"><span>공급가액 <b id="supplyTotal">0원</b></span><span>부가세 <b id="vatTotal">0원</b></span><strong>합계 <b id="grandTotal">0원</b></strong></div><button class="primary">견적 초안 저장</button></form>
+    <details class="card"><summary>자주 쓰는 품목·특기사항 관리</summary><label>품목명</label><input id="favoriteName" placeholder="예: 감지기 교체"><label>규격/단위</label><div class="two"><input id="favoriteSpec" placeholder="규격"><input id="favoriteUnit" placeholder="개"></div><label>저장할 단가</label><input id="favoritePrice" inputmode="numeric" placeholder="사용자가 정한 단가"><button class="secondary" type="button" onclick="saveFavorite()">품목 즐겨찾기 저장</button><label>특기사항 제목</label><input id="noteTemplateTitle" placeholder="예: 방화셔터 특기사항"><label>특기사항 내용</label><textarea id="noteTemplateBody" placeholder="실제 견적에 넣을 문구"></textarea><button class="secondary" type="button" onclick="saveNoteTemplate()">특기사항 문구 저장</button></details>
     <div class="notice">최종 금액 확정·고객 발송은 자동으로 하지 않습니다.</div><div id="estimateList"></div>
   </section>
   <section id="assistant" class="tab">
@@ -48,12 +54,13 @@
   </section>
   <section id="settings" class="tab">
     <div class="pagehead"><h1>설정</h1><p>업무에 필요한 것만 간단히 설정합니다.</p></div>
-    <div class="card"><b>자동화</b><label class="toggle"><input id="voiceReply" type="checkbox" onchange="setVoiceReply(this.checked)"><span>음성 답변 읽어주기</span></label><label class="toggle"><input id="callHistoryEnabled" type="checkbox" onchange="toggleCallHistory(this.checked)"><span>전화기록 자동 연결</span></label><p>기존 갤럭시 전화 앱의 수신·발신·부재중 기록을 번호·시간 기준으로 이 앱에 저장합니다. 통화내용·녹음은 별도로 처리합니다.</p><button class="secondary" type="button" onclick="syncCallHistory()">지금 전화기록 동기화</button><label class="toggle"><input id="monitorEnabled" type="checkbox" onchange="toggleMonitor(this.checked)"><span>통화녹음 자동 확인</span></label></div>
+    <div class="card"><b>자동화</b><label class="toggle"><input id="voiceReply" type="checkbox" onchange="setVoiceReply(this.checked)"><span>음성 답변 읽어주기</span></label><label class="toggle"><input id="callHistoryEnabled" type="checkbox" onchange="toggleCallHistory(this.checked)"><span>전화기록 자동 연결</span></label><p>기존 갤럭시 전화 앱의 수신·발신·부재중 기록을 번호·시간 기준으로 이 앱에 저장합니다. 통화내용·녹음은 별도로 처리합니다.</p><button class="secondary" type="button" onclick="syncCallHistory()">지금 전화기록 동기화</button><label class="toggle"><input id="monitorEnabled" type="checkbox" onchange="toggleMonitor(this.checked)"><span>통화녹음 자동 확인</span></label><label class="toggle"><input id="photoSyncEnabled" type="checkbox" onchange="togglePhotoSync(this.checked)"><span>삼성 카메라 사진 자동 확인</span></label><p>일반 카메라의 새 사진만 찾습니다. 공사중 현장이 하나일 때만 자동 연결하고, 애매한 사진은 확인함에 남깁니다. 원본 사진은 삭제하지 않습니다.</p><button class="secondary" type="button" onclick="syncCameraPhotos()">지금 카메라 사진 확인</button></div>
     <div class="card"><b>캘린더·Drive</b><p>일정은 후보로 저장한 뒤 최종 확인할 수 있습니다. Google Calendar와 Drive는 OAuth 승인이 필요한 연결 기능입니다.</p><button class="secondary" onclick="toastMsg('Google 계정 OAuth 설정이 필요한 기능입니다.')">캘린더 연결 준비</button><button class="secondary" onclick="toastMsg('Google Drive OAuth 설정이 필요한 기능입니다.')">Drive 백업 준비</button></div>
     <details class="card"><summary>AI 서버 연결 <small>개인용 연결 설정</small></summary><label>Netlify 서버 주소</label><input id="serverBase" placeholder="https://xxxxx.netlify.app"><label>앱 접속 코드</label><input id="accessCode" type="password" placeholder="APP_ACCESS_CODE"><button class="primary" onclick="saveSettings()">연결 저장</button><small>OpenAI API Key는 절대 앱에 입력하거나 저장하지 않습니다.</small></details>
     <div class="card"><b>데이터</b><p>이 앱은 Room 로컬 DB에 업무기록을 먼저 저장합니다.</p><button class="secondary" onclick="migrateV1()">V1 기록 한 번 이전</button></div>
   </section>
 </main>
 <nav><button class="active" data-tab="home" onclick="showTab('home')">⌂<span>홈</span></button><button data-tab="inquiries" onclick="showTab('inquiries')">☎<span>문의</span></button><button data-tab="sites" onclick="showTab('sites')">▣<span>현장</span></button><button data-tab="estimates" onclick="showTab('estimates')">₩<span>견적</span></button><button data-tab="assistant" onclick="showTab('assistant')">✦<span>비서</span></button></nav>
+<dialog id="closeConfirmDialog" class="confirm-dialog"><div class="dialog-card"><span class="dialog-eyebrow">현장 마감 최종 확인</span><h2 id="closeConfirmTitle">현장 완료를 확인하세요</h2><p id="closeConfirmText"></p><div id="closeConfirmChecks" class="dialog-checks"></div><div class="two"><button class="secondary" onclick="closeConfirmDialog.close()">취소</button><button class="primary" onclick="confirmSiteCompletion()">공사완료 처리</button></div></div></dialog>
 <div id="toast" class="toast"></div><script src="app.js"></script>
 </body></html>

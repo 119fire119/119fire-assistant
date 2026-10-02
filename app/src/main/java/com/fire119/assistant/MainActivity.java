@@ -62,6 +62,7 @@ public class MainActivity extends Activity {
     private static final int REQ_FOLDER = 1103;
     private static final int REQ_NOTIFICATION = 1104;
     private static final int REQ_CALL_HISTORY = 1106;
+    private static final int REQ_PHOTO_LIBRARY = 1107;
 
     private WebView webView;
     private SharedPreferences prefs;
@@ -117,6 +118,9 @@ public class MainActivity extends Activity {
                 checkSelfPermission(Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED) {
             syncPhoneCallHistoryAsync();
         }
+        if (prefs.getBoolean("photo_sync_enabled", false) && MediaStorePhotoSync.hasPermission(this)) {
+            syncCameraPhotosAsync();
+        }
     }
 
     private void applySystemInsetsToPage() {
@@ -144,6 +148,8 @@ public class MainActivity extends Activity {
             o.put("driveBackup", prefs.getBoolean("drive_backup_enabled", false));
             o.put("callHistoryEnabled", prefs.getBoolean("call_history_enabled", false));
             o.put("callHistoryGranted", checkSelfPermission(Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED);
+            o.put("photoSyncEnabled", prefs.getBoolean("photo_sync_enabled", false));
+            o.put("photoSyncGranted", MediaStorePhotoSync.hasPermission(MainActivity.this));
         } catch (Exception ignored) {}
         return o;
     }
@@ -235,7 +241,7 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public void disableMonitor() {
-            if (!prefs.getBoolean("call_history_enabled", false))
+            if (!prefs.getBoolean("call_history_enabled", false) && !prefs.getBoolean("photo_sync_enabled", false))
                 WorkManager.getInstance(MainActivity.this).cancelUniqueWork("119fire_call_monitor");
             prefs.edit().putBoolean("monitor_enabled", false).apply();
             callJs("onNativeStatus", statusJson());
@@ -266,6 +272,42 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void syncCallHistory() {
             syncPhoneCallHistoryAsync();
+        }
+
+        /** Opt-in metadata scan for images newly saved by Samsung's normal Camera app. */
+        @JavascriptInterface
+        public void enableCameraPhotoSync() {
+            runOnUiThread(() -> {
+                if (!MediaStorePhotoSync.hasPermission(MainActivity.this)) {
+                    String permission = android.os.Build.VERSION.SDK_INT >= 33
+                            ? Manifest.permission.READ_MEDIA_IMAGES : Manifest.permission.READ_EXTERNAL_STORAGE;
+                    requestPermissions(new String[]{permission}, REQ_PHOTO_LIBRARY);
+                    return;
+                }
+                prefs.edit().putBoolean("photo_sync_enabled", true).apply();
+                scheduleMonitor(); syncCameraPhotosAsync(); callJs("onNativeStatus", statusJson());
+            });
+        }
+
+        @JavascriptInterface
+        public void disableCameraPhotoSync() {
+            prefs.edit().putBoolean("photo_sync_enabled", false).apply();
+            if (!prefs.getBoolean("monitor_enabled", false) && !prefs.getBoolean("call_history_enabled", false))
+                WorkManager.getInstance(MainActivity.this).cancelUniqueWork("119fire_call_monitor");
+            callJs("onNativeStatus", statusJson());
+        }
+
+        @JavascriptInterface
+        public void syncCameraPhotos() { syncCameraPhotosAsync(); }
+
+        @JavascriptInterface
+        public String assignPhotoToSite(long photoId, long siteId, String category) {
+            String clean = category == null ? "미분류" : category.trim();
+            if (!(clean.equals("공사 전") || clean.equals("공사 중") || clean.equals("공사 후") || clean.equals("기타") || clean.equals("미분류"))) clean = "미분류";
+            try {
+                database.store().assignPhotoToSite(photoId, siteId, clean);
+                return result(true, "사진을 현장에 연결했습니다.", photoId).toString();
+            } catch (Exception e) { return result(false, "사진 연결에 실패했습니다.", photoId).toString(); }
         }
 
         @JavascriptInterface
@@ -345,6 +387,26 @@ public class MainActivity extends Activity {
                 out.put("tasks", tasksJson(store.openTasks(8)));
                 out.put("sites", sitesJson(store.sites(5)));
                 out.put("calls", callsJson(store.calls(5)));
+                JSONObject stages = new JSONObject();
+                String[] flow = {V3Workflow.NEW_INQUIRY, V3Workflow.SITE_CHECK, V3Workflow.QUOTE_WAIT,
+                        V3Workflow.QUOTE_SENT, V3Workflow.WORK_SCHEDULED, V3Workflow.WORKING,
+                        V3Workflow.WORK_COMPLETE, "수금대기"};
+                for (String stage : flow) {
+                    int count = store.inquiryCountByStatus(stage) + store.siteCountByStatus(stage);
+                    // V2's initial label included a space; keep it visible after V3 update.
+                    if (V3Workflow.SITE_CHECK.equals(stage)) count += store.siteCountByStatus("현장확인 대기");
+                    stages.put(stage, count);
+                }
+                out.put("stages", stages);
+                JSONObject attention = new JSONObject();
+                attention.put("unsentEstimates", store.unsentEstimateCount());
+                attention.put("quoteFollowUp", store.quoteFollowUpCount(new SimpleDateFormat("yyyy-MM-dd'T'HH:mm", Locale.KOREA).format(new Date())));
+                attention.put("unansweredInquiries", store.unansweredInquiryCount());
+                attention.put("photoOnlySites", store.photoOnlySiteCount());
+                attention.put("completedUnpaidSites", store.completedUnpaidSiteCount());
+                attention.put("inbox", store.inboxCount());
+                out.put("attention", attention);
+                out.put("inbox", jobsJson(store.inboxJobs(20)));
             } catch (Exception e) {
                 try { out.put("error", "업무 데이터를 불러오지 못했습니다."); } catch (Exception ignored) {}
             }
@@ -362,6 +424,9 @@ public class MainActivity extends Activity {
                 out.put("estimates", estimatesJson(store.estimates(100)));
                 out.put("photos", photosJson(store.photos(100)));
                 out.put("calls", callsJson(store.calls(100)));
+                out.put("inbox", jobsJson(store.inboxJobs(100)));
+                out.put("favorites", estimateFavoritesJson(store.estimateFavorites(80)));
+                out.put("noteTemplates", estimateNoteTemplatesJson(store.estimateNoteTemplates(80)));
                 out.put("status", statusJson());
             } catch (Exception e) {
                 try { out.put("error", "업무 데이터를 불러오지 못했습니다."); } catch (Exception ignored) {}
@@ -400,8 +465,17 @@ public class MainActivity extends Activity {
                         String name = input.optString("customerName", "").trim();
                         customer.name = name.isEmpty() ? "이름 미확인" : name;
                         customer.company = input.optString("company", "").trim();
+                        customer.contactName = input.optString("contactName", "").trim();
+                        customer.region = input.optString("region", "").trim();
+                        customer.address = input.optString("address", "").trim();
                         customerId = store.insertCustomer(customer);
-                    } else customerId = customer.id;
+                    } else {
+                        customerId = customer.id;
+                        store.updateCustomerProfile(customer.id,
+                                input.optString("customerName", "").trim(), input.optString("company", "").trim(),
+                                input.optString("contactName", "").trim(), input.optString("region", "").trim(),
+                                input.optString("address", "").trim(), System.currentTimeMillis());
+                    }
                 }
                 String siteName = input.optString("siteName", "").trim();
                 Long siteId = null;
@@ -412,6 +486,7 @@ public class MainActivity extends Activity {
                         site.customerId = customerId;
                         site.name = siteName;
                         site.address = input.optString("address", "").trim();
+                        site.status = V3Workflow.SITE_CHECK;
                         siteId = store.insertSite(site);
                     } else siteId = site.id;
                 }
@@ -421,7 +496,7 @@ public class MainActivity extends Activity {
                 inquiry.title = valueOr(input.optString("title", ""), siteName.isEmpty() ? "신규 문의" : siteName + " 문의");
                 inquiry.content = input.optString("content", "").trim();
                 inquiry.source = valueOr(input.optString("source", ""), "확인 불가");
-                inquiry.status = valueOr(input.optString("status", ""), "신규문의");
+                inquiry.status = V3Workflow.normalizeStatus(valueOr(input.optString("status", ""), V3Workflow.NEW_INQUIRY));
                 long id = store.insertInquiry(inquiry);
                 if (!input.optString("dueAt", "").trim().isEmpty()) {
                     WorkDatabase.Task task = new WorkDatabase.Task();
@@ -472,17 +547,70 @@ public class MainActivity extends Activity {
                 estimate.siteId = numberOrNull(input, "siteId");
                 estimate.title = valueOr(input.optString("title", ""), "119파이어 견적서");
                 estimate.supplyAmount = supply; estimate.vat = Math.round(supply * 0.1); estimate.total = supply + estimate.vat;
+                WorkDatabase.Estimate previous = database.store().latestEstimateByTitle(estimate.title);
+                estimate.version = previous == null ? 1 : previous.version + 1;
+                estimate.status = valueOr(input.optString("status", ""), "견적 작성");
+                estimate.followUpAt = input.optString("followUpAt", "").trim();
+                estimate.updatedAt = System.currentTimeMillis();
                 long estimateId = database.store().insertEstimate(estimate);
                 for (int i=0;i<items.length();i++) {
                     JSONObject item = items.getJSONObject(i);
                     WorkDatabase.EstimateItem row = new WorkDatabase.EstimateItem();
                     row.estimateId = estimateId; row.name = valueOr(item.optString("name", ""), "기타");
+                    row.specification = item.optString("specification", "").trim();
                     row.quantity = item.optDouble("quantity", 0); row.unitPrice = item.optLong("unitPrice", 0);
                     row.amount = Math.round(row.quantity * row.unitPrice); row.sortOrder = i;
                     database.store().insertEstimateItem(row);
                 }
-                return result(true, "견적 초안을 저장했습니다. 최종 확정·발송은 별도 확인이 필요합니다.", estimateId).put("total", estimate.total).toString();
+                WorkDatabase.EstimateVersion version = new WorkDatabase.EstimateVersion();
+                version.estimateId = estimateId;
+                version.version = estimate.version;
+                version.snapshotJson = new JSONObject().put("title", estimate.title).put("supply", estimate.supplyAmount)
+                        .put("vat", estimate.vat).put("total", estimate.total).put("items", items).toString();
+                version.noteText = input.optString("noteText", "").trim();
+                database.store().insertEstimateVersion(version);
+                return result(true, "견적 V" + estimate.version + " 초안을 저장했습니다. 최종 확정·발송은 별도 확인이 필요합니다.", estimateId).put("total", estimate.total).put("version", estimate.version).toString();
             } catch (Exception e) { return result(false, "견적 저장에 실패했습니다.", 0).toString(); }
+        }
+
+        @JavascriptInterface
+        public String saveEstimateFavorite(String raw) {
+            try {
+                JSONObject in = new JSONObject(raw == null ? "{}" : raw);
+                String name = in.optString("name", "").trim();
+                if (name.isEmpty()) return result(false, "즐겨찾기 품목명을 입력해주세요.", 0).toString();
+                WorkDatabase.EstimateFavorite value = new WorkDatabase.EstimateFavorite();
+                value.name = name; value.specification = in.optString("specification", "").trim();
+                value.unit = valueOr(in.optString("unit", ""), "개"); value.unitPrice = in.optLong("unitPrice", 0);
+                long id = database.store().insertEstimateFavorite(value);
+                return result(true, "자주 쓰는 품목을 저장했습니다.", id).toString();
+            } catch (Exception e) { return result(false, "품목 저장에 실패했습니다.", 0).toString(); }
+        }
+
+        @JavascriptInterface
+        public String saveEstimateNoteTemplate(String raw) {
+            try {
+                JSONObject in = new JSONObject(raw == null ? "{}" : raw);
+                String body = in.optString("body", "").trim();
+                if (body.isEmpty()) return result(false, "특기사항 내용을 입력해주세요.", 0).toString();
+                WorkDatabase.EstimateNoteTemplate value = new WorkDatabase.EstimateNoteTemplate();
+                value.title = valueOr(in.optString("title", ""), "특기사항"); value.body = body;
+                long id = database.store().insertEstimateNoteTemplate(value);
+                return result(true, "특기사항 문구를 저장했습니다.", id).toString();
+            } catch (Exception e) { return result(false, "특기사항 저장에 실패했습니다.", 0).toString(); }
+        }
+
+        @JavascriptInterface
+        public String updateEstimateStatus(long estimateId, String status, String followUpAt) {
+            try {
+                String clean = V3Workflow.normalizeStatus(status);
+                if (!(V3Workflow.QUOTE_SENT.equals(clean) || V3Workflow.HOLD.equals(clean) ||
+                        V3Workflow.LOST.equals(clean) || V3Workflow.UNKNOWN.equals(clean))) {
+                    return result(false, "견적 상태를 다시 선택해주세요.", estimateId).toString();
+                }
+                database.store().updateEstimateStatus(estimateId, clean, followUpAt == null ? "" : followUpAt.trim(), System.currentTimeMillis());
+                return result(true, "견적 상태를 저장했습니다.", estimateId).toString();
+            } catch (Exception e) { return result(false, "견적 상태 저장에 실패했습니다.", estimateId).toString(); }
         }
 
         @JavascriptInterface
@@ -498,7 +626,7 @@ public class MainActivity extends Activity {
                 int y = 130; paint.setTextSize(13); canvas.drawText("항목", 44, y, paint); canvas.drawText("수량", 290, y, paint); canvas.drawText("단가", 365, y, paint); canvas.drawText("금액", 465, y, paint);
                 y += 24; paint.setTextSize(11);
                 for (WorkDatabase.EstimateItem item : database.store().estimateItems(estimateId)) {
-                    canvas.drawText(item.name, 44, y, paint); canvas.drawText(String.valueOf(item.quantity), 290, y, paint);
+                    canvas.drawText(item.name + (item.specification.isEmpty() ? "" : " (" + item.specification + ")"), 44, y, paint); canvas.drawText(String.valueOf(item.quantity), 290, y, paint);
                     canvas.drawText(String.format(Locale.KOREA, "%,d", item.unitPrice), 365, y, paint);
                     canvas.drawText(String.format(Locale.KOREA, "%,d", item.amount), 465, y, paint); y += 22;
                 }
@@ -520,16 +648,45 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public String finishSite(long siteId, String note) {
+            // V2 bridge compatibility: status is no longer changed here. V3 always asks first.
+            return getSiteClosePreview(siteId, note);
+        }
+
+        /** Builds a factual close-out checklist but never marks work complete. */
+        @JavascriptInterface
+        public String getSiteClosePreview(long siteId, String note) {
             try {
-                WorkDatabase.Site site = database.store().siteById(siteId);
+                WorkDatabase.Store store = database.store();
+                WorkDatabase.Site site = store.siteById(siteId);
                 if (site == null) return result(false, "현장을 찾지 못했습니다.", siteId).toString();
-                database.store().finishSite(siteId, "공사 완료 후보", note == null ? "" : note.trim(), System.currentTimeMillis());
+                String actualNote = note == null || note.trim().isEmpty() ? site.workNote : note.trim();
+                int before = store.photoCountForCategory(siteId, "공사 전");
+                int during = store.photoCountForCategory(siteId, "공사 중");
+                int after = store.photoCountForCategory(siteId, "공사 후");
+                JSONObject out = result(true, V3Workflow.closeMessage(after, actualNote), siteId);
+                out.put("siteName", site.name); out.put("note", actualNote); out.put("before", before); out.put("during", during); out.put("after", after);
+                out.put("blogReadiness", V3Workflow.blogReadiness(before, during, after, actualNote));
+                out.put("requiresConfirm", true);
+                return out.toString();
+            } catch (Exception e) { return result(false, "현장 마감 정보를 확인하지 못했습니다.", siteId).toString(); }
+        }
+
+        /** Called only after the user presses the final confirmation in the V3 dialog. */
+        @JavascriptInterface
+        public String confirmSiteCompletion(long siteId, String note) {
+            try {
+                WorkDatabase.Store store = database.store();
+                WorkDatabase.Site site = store.siteById(siteId);
+                if (site == null) return result(false, "현장을 찾지 못했습니다.", siteId).toString();
+                String actualNote = note == null || note.trim().isEmpty() ? site.workNote : note.trim();
+                long now = System.currentTimeMillis();
+                store.confirmSiteComplete(siteId, V3Workflow.WORK_COMPLETE, actualNote, now);
                 WorkDatabase.Task task = new WorkDatabase.Task();
                 task.siteId = siteId; task.customerId = site.customerId; task.title = "수금 상태 확인";
-                task.source = "끝났어 자동정리"; task.requiresConfirmation = true;
-                database.store().insertTask(task);
-                return result(true, "완료 후보와 수금 확인 할 일을 만들었습니다. 공사 완료는 화면에서 확인 후 확정하세요.", siteId).toString();
-            } catch (Exception e) { return result(false, "현장 마감 정리에 실패했습니다.", siteId).toString(); }
+                task.source = "V3 현장 완료 확인"; task.requiresConfirmation = true;
+                store.insertTask(task);
+                return result(true, "공사완료로 저장했고 수금 확인 할 일을 만들었습니다.", siteId).toString();
+            } catch (Exception e) { return result(false, "현장 완료 처리에 실패했습니다.", siteId).toString(); }
         }
 
         @JavascriptInterface
@@ -538,11 +695,14 @@ public class MainActivity extends Activity {
                 if (siteName == null || siteName.trim().isEmpty()) return result(false, "음성메모를 저장할 현장명을 먼저 입력하세요.", 0).toString();
                 WorkDatabase.Store store = database.store(); WorkDatabase.Site site = store.siteByName(siteName.trim());
                 long siteId;
-                if (site == null) { site = new WorkDatabase.Site(); site.name = siteName.trim(); siteId = store.insertSite(site); }
-                else siteId = site.id;
                 String previous = site == null ? "" : site.workNote;
+                if (site == null) { site = new WorkDatabase.Site(); site.name = siteName.trim(); site.status = V3Workflow.WORKING; siteId = store.insertSite(site); }
+                else siteId = site.id;
                 String combined = (previous == null || previous.isEmpty()) ? note.trim() : previous + "\n" + note.trim();
                 store.updateSiteNote(siteId, combined, System.currentTimeMillis());
+                WorkDatabase.VoiceMemo memo = new WorkDatabase.VoiceMemo();
+                memo.siteId = siteId; memo.text = note == null ? "" : note.trim(); memo.source = "현장 음성메모";
+                store.insertVoiceMemo(memo);
                 return result(true, "현장 음성메모를 저장했습니다.", siteId).toString();
             } catch (Exception e) { return result(false, "현장 음성메모 저장에 실패했습니다.", 0).toString(); }
         }
@@ -629,6 +789,80 @@ public class MainActivity extends Activity {
                 return result(id > 0, id > 0 ? "일정 후보를 저장했습니다. 캘린더 등록은 최종 확인 후 진행됩니다." : "같은 일정 후보가 이미 있습니다.", id).toString();
             } catch (Exception e) { return result(false, "일정 후보 저장에 실패했습니다.", 0).toString(); }
         }
+
+        @JavascriptInterface
+        public String getCustomerDetail(long customerId) {
+            try {
+                WorkDatabase.Store store = database.store();
+                WorkDatabase.Customer customer = store.customerById(customerId);
+                if (customer == null) return result(false, "고객 정보를 찾지 못했습니다.", customerId).toString();
+                JSONObject out = result(true, "고객 연결 기록입니다.", customerId);
+                JSONObject c = new JSONObject();
+                c.put("id", customer.id); c.put("company", customer.company); c.put("name", customer.name);
+                c.put("contactName", customer.contactName); c.put("phone", customer.phone); c.put("region", customer.region); c.put("address", customer.address); c.put("memo", customer.memo);
+                out.put("customer", c);
+                out.put("inquiries", inquiriesJson(store.inquiriesByCustomer(customerId, 30)));
+                out.put("sites", sitesJson(store.sitesByCustomer(customerId, 30)));
+                out.put("estimates", estimatesJson(store.estimatesByCustomer(customerId, 30)));
+                out.put("calls", callsJson(store.callsByCustomer(customerId, 50)));
+                return out.toString();
+            } catch (Exception e) { return result(false, "고객 연결 기록을 불러오지 못했습니다.", customerId).toString(); }
+        }
+
+        @JavascriptInterface
+        public String getBlogReadiness(long siteId) {
+            try {
+                WorkDatabase.Store store = database.store(); WorkDatabase.Site site = store.siteById(siteId);
+                if (site == null) return result(false, "현장을 찾지 못했습니다.", siteId).toString();
+                int before = store.photoCountForCategory(siteId, "공사 전");
+                int during = store.photoCountForCategory(siteId, "공사 중");
+                int after = store.photoCountForCategory(siteId, "공사 후");
+                String status = V3Workflow.blogReadiness(before, during, after, site.workNote);
+                JSONObject out = result(true, status, siteId);
+                out.put("status", status); out.put("before", before); out.put("during", during); out.put("after", after);
+                out.put("missing", status.equals("블로그 작성 가능") ? "" : status);
+                return out.toString();
+            } catch (Exception e) { return result(false, "블로그 준비도를 확인하지 못했습니다.", siteId).toString(); }
+        }
+
+        /** Creates only a draft using local records. It never publishes or modifies a Naver post. */
+        @JavascriptInterface
+        public void createBlogDraft(long siteId) {
+            new Thread(() -> {
+                JSONObject out = new JSONObject();
+                try {
+                    WorkDatabase.Store store = database.store(); WorkDatabase.Site site = store.siteById(siteId);
+                    if (site == null) throw new Exception("현장을 찾지 못했습니다.");
+                    int before = store.photoCountForCategory(siteId, "공사 전");
+                    int during = store.photoCountForCategory(siteId, "공사 중");
+                    int after = store.photoCountForCategory(siteId, "공사 후");
+                    if (!V3Workflow.blogReadiness(before, during, after, site.workNote).equals("블로그 작성 가능"))
+                        throw new Exception("사진 또는 실제 작업내용이 부족해 초안을 만들 수 없습니다.");
+                    String base = normalizeBase(prefs.getString("server_base", ""));
+                    String code = prefs.getString("app_access_code", "");
+                    if (code.isEmpty()) throw new Exception("AI 서버 연결을 먼저 설정해주세요.");
+                    JSONObject facts = new JSONObject();
+                    facts.put("siteName", site.name); facts.put("address", site.address); facts.put("workNote", site.workNote);
+                    facts.put("status", site.status); facts.put("photos", photosJson(store.photosForSite(siteId)));
+                    if (site.customerId != null) {
+                        WorkDatabase.Customer customer = store.customerById(site.customerId);
+                        if (customer != null) facts.put("customer", customer.company);
+                        facts.put("relatedCalls", callsJson(store.callsByCustomer(site.customerId, 10)));
+                    }
+                    JSONObject body = new JSONObject(); body.put("code", code); body.put("facts", facts);
+                    JSONObject response = new JSONObject(postJson(base + "/.netlify/functions/blog-draft", body.toString()));
+                    WorkDatabase.BlogDraft draft = new WorkDatabase.BlogDraft();
+                    draft.siteId = siteId; draft.content = response.optString("draft", "");
+                    draft.title = site.name + " 블로그 초안"; draft.seoVersion = response.optString("seoVersion", "119파이어 스토리텔링 SEO 21.0");
+                    draft.status = "초안 확인 필요"; draft.missingFacts = "사용자 확인 후만 게시";
+                    long id = store.insertBlogDraft(draft);
+                    out.put("ok", true); out.put("id", id); out.put("draft", draft.content); out.put("message", "블로그 초안을 저장했습니다. 실제 내용만 남았는지 확인해주세요.");
+                } catch (Exception e) {
+                    try { out.put("ok", false); out.put("error", e.getMessage() == null ? "블로그 초안 생성에 실패했습니다." : e.getMessage()); } catch (Exception ignored) {}
+                }
+                callJs("onBlogDraft", out);
+            }).start();
+        }
     }
 
     private JSONObject result(boolean ok, String message, long id) {
@@ -646,7 +880,7 @@ public class MainActivity extends Activity {
         JSONArray a = new JSONArray(); for (WorkDatabase.Inquiry x:items) try { JSONObject o=new JSONObject(); o.put("id",x.id);o.put("title",x.title);o.put("content",x.content);o.put("status",x.status);o.put("source",x.source);o.put("siteId",x.siteId);o.put("customerId",x.customerId);o.put("updatedAt",x.updatedAt);a.put(o);}catch(Exception ignored){} return a;
     }
     private JSONArray sitesJson(java.util.List<WorkDatabase.Site> items) {
-        JSONArray a = new JSONArray(); for (WorkDatabase.Site x:items) try { JSONObject o=new JSONObject(); o.put("id",x.id);o.put("name",x.name);o.put("address",x.address);o.put("status",x.status);o.put("workNote",x.workNote);o.put("customerId",x.customerId);o.put("updatedAt",x.updatedAt);a.put(o);}catch(Exception ignored){} return a;
+        JSONArray a = new JSONArray(); for (WorkDatabase.Site x:items) try { JSONObject o=new JSONObject(); o.put("id",x.id);o.put("name",x.name);o.put("address",x.address);o.put("status",x.status);o.put("workNote",x.workNote);o.put("customerId",x.customerId);o.put("visitAt",x.visitAt);o.put("startedAt",x.startedAt);o.put("finishedAt",x.finishedAt);o.put("revisitNote",x.revisitNote);o.put("updatedAt",x.updatedAt);a.put(o);}catch(Exception ignored){} return a;
     }
     private JSONArray tasksJson(java.util.List<WorkDatabase.Task> items) {
         JSONArray a = new JSONArray(); for (WorkDatabase.Task x:items) try { JSONObject o=new JSONObject(); o.put("id",x.id);o.put("title",x.title);o.put("dueAt",x.dueAt);o.put("status",x.status);o.put("source",x.source);o.put("siteId",x.siteId);o.put("requiresConfirmation",x.requiresConfirmation);a.put(o);}catch(Exception ignored){} return a;
@@ -659,6 +893,15 @@ public class MainActivity extends Activity {
     }
     private JSONArray callsJson(java.util.List<WorkDatabase.CallRecord> items) {
         JSONArray a = new JSONArray(); for (WorkDatabase.CallRecord x:items) try { JSONObject o=new JSONObject(); o.put("id",x.id);o.put("name",x.displayName);o.put("uri",x.sourceUri);o.put("size",x.fileSize);o.put("modified",x.modifiedAt);o.put("phone",x.phone);o.put("status",x.processingStatus);o.put("summary",x.summary);o.put("kind",x.sourceUri.startsWith("calllog:")?"통화기록":"통화녹음");a.put(o);}catch(Exception ignored){} return a;
+    }
+    private JSONArray estimateFavoritesJson(java.util.List<WorkDatabase.EstimateFavorite> items) {
+        JSONArray a = new JSONArray(); for (WorkDatabase.EstimateFavorite x:items) try { JSONObject o=new JSONObject();o.put("id",x.id);o.put("name",x.name);o.put("specification",x.specification);o.put("unit",x.unit);o.put("unitPrice",x.unitPrice);a.put(o);}catch(Exception ignored){} return a;
+    }
+    private JSONArray estimateNoteTemplatesJson(java.util.List<WorkDatabase.EstimateNoteTemplate> items) {
+        JSONArray a = new JSONArray(); for (WorkDatabase.EstimateNoteTemplate x:items) try { JSONObject o=new JSONObject();o.put("id",x.id);o.put("title",x.title);o.put("body",x.body);a.put(o);}catch(Exception ignored){} return a;
+    }
+    private JSONArray jobsJson(java.util.List<WorkDatabase.AutomationJob> items) {
+        JSONArray a = new JSONArray(); for (WorkDatabase.AutomationJob x:items) try { JSONObject o=new JSONObject();o.put("id",x.id);o.put("type",x.type);o.put("payload",x.payloadJson);o.put("status",x.status);o.put("error",x.lastError);o.put("updatedAt",x.updatedAt);a.put(o);}catch(Exception ignored){} return a;
     }
 
     private void syncPhoneCallHistoryAsync() {
@@ -675,6 +918,22 @@ public class MainActivity extends Activity {
                 try { out.put("ok", false); out.put("error", "전화기록을 불러오지 못했습니다."); } catch (Exception ignored) {}
             }
             callJs("onCallHistorySynced", out);
+        }).start();
+    }
+
+    private void syncCameraPhotosAsync() {
+        new Thread(() -> {
+            JSONObject out = new JSONObject();
+            try {
+                int count = MediaStorePhotoSync.sync(MainActivity.this);
+                out.put("ok", true); out.put("count", count);
+                out.put("message", count == 0 ? "새 카메라 사진이 없습니다." : count + "장의 새 카메라 사진을 확인했습니다.");
+            } catch (SecurityException e) {
+                try { out.put("ok", false); out.put("error", "사진 접근 권한을 허용해주세요."); } catch (Exception ignored) {}
+            } catch (Exception e) {
+                try { out.put("ok", false); out.put("error", "카메라 사진을 확인하지 못했습니다."); } catch (Exception ignored) {}
+            }
+            callJs("onCameraPhotosSynced", out);
         }).start();
     }
 
@@ -852,8 +1111,13 @@ public class MainActivity extends Activity {
                 if (site == null) {
                     site = new WorkDatabase.Site();
                     site.name = pendingJobName;
+                    site.status = V3Workflow.WORKING;
+                    site.startedAt = System.currentTimeMillis();
                     siteId = store.insertSite(site);
-                } else siteId = site.id;
+                } else {
+                    siteId = site.id;
+                    store.markSiteStarted(siteId, System.currentTimeMillis());
+                }
                 WorkDatabase.Photo photo = new WorkDatabase.Photo();
                 photo.siteId = siteId; photo.path = pendingPhoto.getAbsolutePath(); photo.name = pendingPhoto.getName();
                 photo.category = "미분류";
@@ -886,6 +1150,11 @@ public class MainActivity extends Activity {
             scheduleMonitor();
             syncPhoneCallHistoryAsync();
             callJs("onNativeStatus", statusJson());
+        }
+        if (req == REQ_PHOTO_LIBRARY && results.length > 0 &&
+                results[0] == PackageManager.PERMISSION_GRANTED) {
+            prefs.edit().putBoolean("photo_sync_enabled", true).apply();
+            scheduleMonitor(); syncCameraPhotosAsync(); callJs("onNativeStatus", statusJson());
         }
         if (req == 1105 && results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) {
             beginVoiceRecognition();

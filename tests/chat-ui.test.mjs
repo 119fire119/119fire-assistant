@@ -6,7 +6,7 @@ const script = fs.readFileSync(new URL('../app/src/main/assets/app.js', import.m
 const ids = ['toast','todayLabel','metrics','briefing','priorityTasks','recentWork','inquiryList',
   'siteList','finishSiteSelect','photoList','estimateList','recordingInfo','voiceReply',
   'monitorEnabled','callHistoryEnabled','estimateRows','supplyTotal','vatTotal','grandTotal','chat','serverBase',
-  'accessCode'];
+  'accessCode','stageGrid','attentionList','favoriteItems','estimateNotes','photoSyncEnabled'];
 const elements = Object.fromEntries(ids.map(id => [id, {innerHTML:'', textContent:'', value:'',
   className:'', scrollTop:0, scrollHeight:200, checked:false}]));
 const data = {inquiries:[],sites:[],tasks:[],estimates:[],photos:[],calls:[],status:{}};
@@ -21,7 +21,7 @@ const context = {
 };
 context.window = context;
 vm.runInNewContext(script, context, {filename:'app.js'});
-assert.match(elements.chat.innerHTML, /119파이어 비서입니다/);
+assert.match(elements.chat.innerHTML, /119파이어 AI 비서입니다/);
 context.onAiResponse(JSON.stringify({ok:true, reply:'AI 연결 테스트 성공'}));
 assert.match(elements.chat.innerHTML, /AI 연결 테스트 성공/);
 context.onAiResponse(JSON.stringify({ok:false, error:'앱 접속 코드가 맞지 않습니다.'}));

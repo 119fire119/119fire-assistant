@@ -3,7 +3,7 @@ name: Build 119Fire APK
 on:
   workflow_dispatch:
   push:
-    branches: [ "main", "v2" ]
+    branches: [ "main", "v2", "v3" ]
 
 jobs:
   build:
