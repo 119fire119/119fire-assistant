@@ -2,7 +2,7 @@ const LEGACY_KEY="119fire_hybrid_data_v1";
 let workspace={inquiries:[],sites:[],tasks:[],estimates:[],photos:[],calls:[],inbox:[],favorites:[],noteTemplates:[],status:{}};
 let chat=[{role:"assistant",text:"119파이어 AI 비서입니다. 저장된 업무 기록과 확인함을 기준으로 찾아드릴게요."}];
 let estimateRows=[{name:"",specification:"",quantity:1,unitPrice:""}];
-let voiceMode="assistant",pendingClose=null;
+let voiceMode="assistant",pendingClose=null,openCallId=0;
 const photoCategories=["미분류","공사 전","공사 중","공사 후","기타"];
 const money=n=>Number(n||0).toLocaleString("ko-KR")+"원";
 const esc=s=>String(s||"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"}[c]));
@@ -21,9 +21,12 @@ function render(){
   const stages=[["신규문의","신규 문의"],["현장확인대기","현장 확인"],["견적대기","견적 대기"],["견적발송","견적 발송"],["공사예정","공사 예정"],["공사중","공사 중"],["공사완료","공사 완료"],["수금대기","수금 대기"]];
   el("stageGrid").innerHTML=stages.map(([key,label])=>`<div class="stage"><b>${d.stages?.[key]||0}</b><span>${label}</span></div>`).join("");
   const attention=[["견적을 보내지 않은 건",d.attention?.unsentEstimates||0],["결과 확인이 필요한 견적",d.attention?.quoteFollowUp||0],["답변하지 않은 문의",d.attention?.unansweredInquiries||0],["사진만 있고 정리되지 않은 현장",d.attention?.photoOnlySites||0],["공사완료 후 수금되지 않은 현장",d.attention?.completedUnpaidSites||0],["확인할 것 Inbox",d.attention?.inbox||0]].filter(x=>x[1]>0);
-  el("attentionList").innerHTML=attention.length?attention.map(x=>`<div class="attention-row"><b>${esc(x[0])}</b><strong>${x[1]}건</strong></div>`).join(""):'<div class="item"><b>지금 확인할 항목이 없습니다.</b><p>자동 정리 결과를 계속 확인해드릴게요.</p></div>';
-  el("priorityTasks").innerHTML=(d.tasks||[]).length?(d.tasks||[]).map(taskCard).join(""):'<div class="item"><b>지금 급한 미처리 업무가 없습니다.</b><p>새 통화와 오늘 현장을 한 번 확인해보세요.</p></div>';
-  el("recentWork").innerHTML=[...(d.sites||[]).map(s=>`<div class="item"><b>▣ ${esc(s.name)}</b><p>${esc(s.status)}${s.address?" · "+esc(s.address):""}</p></div>`),...(d.calls||[]).slice(0,2).map(c=>`<div class="item"><b>${c.kind==="통화기록"?"☎":"🎙"} ${esc(c.name)}</b><p>${esc(c.summary||c.status||"확인 필요")}</p></div>`)].join("")||'<div class="item"><p>아직 연결된 업무가 없습니다.</p></div>';
+  el("attentionList").innerHTML=attention.map(x=>`<div class="attention-row"><b>${esc(x[0])}</b><strong>${x[1]}건</strong></div>`).join("");
+  el("attentionCard").classList.toggle("hidden",!attention.length);
+  const priority=d.tasks||[];
+  el("priorityTasks").innerHTML=priority.map(taskCard).join("");
+  el("priorityCard").classList.toggle("hidden",!priority.length);
+  el("recentWork").innerHTML=[...(d.sites||[]).map(s=>`<div class="item"><b>▣ ${esc(s.name)}</b><p>${esc(s.status)}${s.address?" · "+esc(s.address):""}</p></div>`),...(d.calls||[]).slice(0,2).map(c=>`<button type="button" class="item recent-call" onclick="openCall(${Number(c.id)})"><b>${c.kind==="통화기록"?"☎":"🎙"} ${esc(c.name)}</b><p>${esc(c.summary||c.status||"확인 필요")}</p><span>통화 내용 보기 ›</span></button>`)].join("")||'<div class="item"><p>아직 연결된 업무가 없습니다.</p></div>';
   el("inquiryList").innerHTML=(workspace.inquiries||[]).map(x=>`<div class="item"><b>${esc(x.title)}</b><p>${esc(x.content)}</p><div class="meta">${esc(x.status)} · ${esc(x.source)}</div>${x.customerId?`<button class="tiny" onclick="openCustomer(${x.customerId})">고객 이력 보기</button>`:""}</div>`).join("")||'<div class="item"><p>등록된 문의가 없습니다.</p></div>';
   el("siteList").innerHTML=(workspace.sites||[]).map(s=>`<div class="item"><b>▣ ${esc(s.name)}</b><p>${esc(s.address||"주소 확인 필요")}<br>${esc(s.status)}</p>${s.workNote?`<div class="meta">작업기록: ${esc(s.workNote)}</div>`:""}<div class="inline-actions"><button class="tiny" onclick="showBlogReadiness(${s.id})">블로그 준비도</button>${s.customerId?`<button class="tiny" onclick="openCustomer(${s.customerId})">고객 이력</button>`:""}</div></div>`).join("")||'<div class="item"><p>현장 사진을 찍거나 문의를 등록하면 현장이 연결됩니다.</p></div>';
   const options='<option value="">현장 선택</option>'+(workspace.sites||[]).map(s=>`<option value="${s.id}">${esc(s.name)} · ${esc(s.status)}</option>`).join("");el("finishSiteSelect").innerHTML=options;
@@ -54,6 +57,8 @@ function saveNoteTemplate(){const r=parse(nativeCall("saveEstimateNoteTemplate",
 function exportEstimate(id){const r=parse(nativeCall("exportEstimatePdf",id));toastMsg(r.message||"PDF 생성 완료")}
 function markEstimateSent(id){const status=prompt("상태: 견적발송 / 보류 / 실주 / 결과 확인 불가", "견적발송");if(!status)return;const follow=prompt("결과 확인 날짜·시간 (확실할 때만, 예: 2026-10-03T10:00)","");const r=parse(nativeCall("updateEstimateStatus",id,status,follow||""));toastMsg(r.message||"상태를 저장했습니다.");if(r.ok)refreshWorkspace()}
 function openCustomer(id){const r=parse(nativeCall("getCustomerDetail",id));if(!r.ok){toastMsg(r.message||"고객 기록을 찾지 못했습니다.");return}const c=r.customer||{};chat.push({role:"assistant",text:`[고객 연결 기록]\n${c.company||"업체명 확인 필요"} · ${c.contactName||c.name||"담당자 확인 필요"}\n${c.phone||"전화번호 확인 필요"}\n문의 ${r.inquiries?.length||0}건 · 현장 ${r.sites?.length||0}건 · 견적 ${r.estimates?.length||0}건 · 통화 ${r.calls?.length||0}건`});showTab("assistant");renderChat()}
+function openCall(callId){const r=parse(nativeCall("getCallDetail",callId));if(!r.ok){toastMsg(r.message||"통화 기록을 찾지 못했습니다.");return}openCallId=callId;el("callDetailTitle").textContent=r.name||"통화기록";el("callDetailMeta").textContent=[r.when,r.phone,r.kind].filter(Boolean).join(" · ");el("callDetailSummary").textContent=r.summary||"아직 AI 요약이 없습니다.";el("callDetailTranscript").textContent=r.hasTranscript?r.transcript:"연결된 통화녹음 전사가 아직 없습니다.";el("callDetailHint").textContent=r.documentHint||"";el("callDetailDialog").showModal()}
+function exportCallDocument(){if(!openCallId){toastMsg("저장할 통화를 먼저 선택하세요.");return}const r=parse(nativeCall("exportCallDocument",openCallId));toastMsg(r.message||"통화 문서를 저장했습니다.")}
 function showBlogReadiness(siteId){const r=parse(nativeCall("getBlogReadiness",siteId));toastMsg(r.ok?`${r.status} · 전 ${r.before}장 / 중 ${r.during}장 / 후 ${r.after}장`:(r.message||"준비도를 확인하지 못했습니다."));if(r.ok&&r.status==="블로그 작성 가능"&&confirm("실제 자료만으로 블로그 초안을 만들까요?"))nativeCall("createBlogDraft",siteId)}
 function startVoice(){voiceMode="assistant";nativeCall("startVoiceAssistant")}
 function askAssistant(){const m=el("askText").value.trim();if(m){el("askText").value="";quickAsk(m)}}

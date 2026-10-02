@@ -323,6 +323,7 @@ public abstract class WorkDatabase extends RoomDatabase {
         @Query("SELECT * FROM Site WHERE name=:name ORDER BY updatedAt DESC LIMIT 1") Site siteByName(String name);
         @Query("SELECT * FROM Site WHERE id=:id LIMIT 1") Site siteById(long id);
         @Query("SELECT * FROM CallRecord WHERE sourceUri=:uri LIMIT 1") CallRecord callByUri(String uri);
+        @Query("SELECT * FROM CallRecord WHERE id=:id LIMIT 1") CallRecord callById(long id);
         @Query("SELECT * FROM Inquiry ORDER BY updatedAt DESC LIMIT :limit") List<Inquiry> inquiries(int limit);
         @Query("SELECT * FROM Site ORDER BY updatedAt DESC LIMIT :limit") List<Site> sites(int limit);
         @Query("SELECT * FROM Task WHERE status!='완료' ORDER BY CASE WHEN dueAt='' THEN 1 ELSE 0 END, dueAt ASC LIMIT :limit") List<Task> openTasks(int limit);

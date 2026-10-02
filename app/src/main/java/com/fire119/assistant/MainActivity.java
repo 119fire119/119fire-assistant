@@ -809,6 +809,71 @@ public class MainActivity extends Activity {
             } catch (Exception e) { return result(false, "고객 연결 기록을 불러오지 못했습니다.", customerId).toString(); }
         }
 
+        /** Shows the factual call record. Spoken words appear only after a linked recording was transcribed. */
+        @JavascriptInterface
+        public String getCallDetail(long callId) {
+            try {
+                WorkDatabase.CallRecord call = database.store().callById(callId);
+                if (call == null) return result(false, "통화기록을 찾지 못했습니다.", callId).toString();
+                boolean hasTranscript = call.transcript != null && !call.transcript.trim().isEmpty();
+                JSONObject out = result(true, hasTranscript ? "AI 전사 내용을 확인하세요." : "이 통화는 녹음 전사가 아직 연결되지 않았습니다.", callId);
+                out.put("id", call.id); out.put("name", call.displayName); out.put("phone", call.phone);
+                out.put("when", call.modifiedAt); out.put("status", call.processingStatus); out.put("summary", call.summary);
+                out.put("transcript", hasTranscript ? call.transcript : ""); out.put("hasTranscript", hasTranscript);
+                out.put("kind", call.sourceUri.startsWith("calllog:") ? "전화기록" : "통화녹음");
+                out.put("documentHint", hasTranscript ? "전사와 요약을 PDF 통화기록으로 저장할 수 있습니다." : "전화기록만으로는 통화 내용을 알 수 없습니다. 같은 통화의 삼성 녹음파일을 연결하고 AI 분석하면 발언내용을 문서로 만들 수 있습니다.");
+                return out.toString();
+            } catch (Exception e) { return result(false, "통화 상세를 불러오지 못했습니다.", callId).toString(); }
+        }
+
+        /** Exports a local PDF record; it never invents a conversation when no transcription exists. */
+        @JavascriptInterface
+        public String exportCallDocument(long callId) {
+            PdfDocument pdf = new PdfDocument();
+            try {
+                WorkDatabase.CallRecord call = database.store().callById(callId);
+                if (call == null) return result(false, "통화기록을 찾지 못했습니다.", callId).toString();
+                PdfDocument.Page page = pdf.startPage(new PdfDocument.PageInfo.Builder(595, 842, 1).create());
+                Canvas canvas = page.getCanvas(); Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+                paint.setColor(0xff191b1f); paint.setTextSize(23); paint.setFakeBoldText(true);
+                canvas.drawText("119FIRE CALL NOTE", 42, 58, paint);
+                paint.setFakeBoldText(false); paint.setTextSize(11);
+                long at = call.modifiedAt > 0 ? call.modifiedAt : call.createdAt;
+                String time = new SimpleDateFormat("yyyy년 M월 d일 HH:mm", Locale.KOREA).format(new Date(at));
+                int y = 92;
+                y = drawPdfText(canvas, paint, "통화 상대: " + valueOr(call.displayName, "이름 미확인"), 42, y, 510, 15);
+                y = drawPdfText(canvas, paint, "전화번호: " + valueOr(call.phone, "확인 필요"), 42, y, 510, 15);
+                y = drawPdfText(canvas, paint, "통화 시각: " + time, 42, y, 510, 15);
+                y = drawPdfText(canvas, paint, "기록 종류: " + (call.sourceUri.startsWith("calllog:") ? "전화기록" : "삼성 통화녹음"), 42, y, 510, 15);
+                paint.setFakeBoldText(true); paint.setTextSize(13); y += 16; canvas.drawText("요약", 42, y, paint); y += 18;
+                paint.setFakeBoldText(false); paint.setTextSize(11);
+                y = drawPdfText(canvas, paint, valueOr(call.summary, "요약 확인 필요"), 42, y, 510, 15);
+                paint.setFakeBoldText(true); paint.setTextSize(13); y += 14; canvas.drawText("통화 내용", 42, y, paint); y += 18;
+                paint.setFakeBoldText(false); paint.setTextSize(11);
+                String transcript = call.transcript == null ? "" : call.transcript.trim();
+                String body = transcript.isEmpty()
+                        ? "삼성 통화녹음 전사가 아직 연결되지 않았습니다. 전화기록만으로 실제 대화 내용을 작성하지 않습니다."
+                        : transcript;
+                drawPdfText(canvas, paint, body, 42, y, 510, 15);
+                pdf.finishPage(page);
+                File dir = new File(getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), "119Fire/call-notes"); if (!dir.exists()) dir.mkdirs();
+                String safe = valueOr(call.displayName, "통화기록").replaceAll("[\\\\/:*?\"<>|]", "_");
+                String baseName = "call_" + new SimpleDateFormat("yyyyMMdd_HHmm", Locale.KOREA).format(new Date(at)) + "_" + safe;
+                File out = new File(dir, baseName + ".pdf");
+                try (FileOutputStream stream = new FileOutputStream(out)) { pdf.writeTo(stream); }
+                WorkDatabase.Document doc = new WorkDatabase.Document(); doc.customerId = call.customerId; doc.type = "통화기록"; doc.name = out.getName(); doc.path = out.getAbsolutePath(); database.store().insertDocument(doc);
+                // TXT keeps the whole transcript intact even when a long call exceeds one PDF page.
+                File textOut = new File(dir, baseName + ".txt");
+                String fullText = "119파이어 통화기록\n\n통화 상대: " + valueOr(call.displayName, "이름 미확인") +
+                        "\n전화번호: " + valueOr(call.phone, "확인 필요") + "\n통화 시각: " + time +
+                        "\n\n[요약]\n" + valueOr(call.summary, "요약 확인 필요") + "\n\n[통화 내용]\n" + body + "\n";
+                try (FileOutputStream stream = new FileOutputStream(textOut)) { stream.write(fullText.getBytes(StandardCharsets.UTF_8)); }
+                WorkDatabase.Document textDoc = new WorkDatabase.Document(); textDoc.customerId = call.customerId; textDoc.type = "통화기록 원문"; textDoc.name = textOut.getName(); textDoc.path = textOut.getAbsolutePath(); database.store().insertDocument(textDoc);
+                return result(true, transcript.isEmpty() ? "전사 없음 표시로 통화기록 PDF·TXT를 저장했습니다." : "통화 전사·요약 PDF·TXT를 저장했습니다.", callId).put("path", out.getAbsolutePath()).put("textPath", textOut.getAbsolutePath()).toString();
+            } catch (Exception e) { return result(false, "통화기록 PDF 생성에 실패했습니다.", callId).toString(); }
+            finally { pdf.close(); }
+        }
+
         @JavascriptInterface
         public String getBlogReadiness(long siteId) {
             try {
@@ -935,6 +1000,24 @@ public class MainActivity extends Activity {
             }
             callJs("onCameraPhotosSynced", out);
         }).start();
+    }
+
+    /** Draws a short wrapped paragraph in an on-device PDF. The full transcript is also saved as TXT. */
+    private int drawPdfText(Canvas canvas, Paint paint, String text, int x, int y, int width, int lineHeight) {
+        String[] paragraphs = (text == null ? "" : text).replace("\r", "").split("\n", -1);
+        for (String paragraph : paragraphs) {
+            String remaining = paragraph;
+            if (remaining.isEmpty()) { y += lineHeight; continue; }
+            while (!remaining.isEmpty()) {
+                int count = paint.breakText(remaining, true, width, null);
+                if (count <= 0) break;
+                canvas.drawText(remaining.substring(0, count), x, y, paint);
+                remaining = remaining.substring(count);
+                y += lineHeight;
+                if (y > 790) return y;
+            }
+        }
+        return y;
     }
 
     private void beginVoiceRecognition() {
