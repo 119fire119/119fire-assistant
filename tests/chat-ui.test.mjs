@@ -5,7 +5,7 @@ import vm from 'node:vm';
 const script = fs.readFileSync(new URL('../app/src/main/assets/app.js', import.meta.url), 'utf8');
 const ids = ['toast','todayLabel','metrics','briefing','priorityTasks','recentWork','inquiryList',
   'siteList','finishSiteSelect','photoList','estimateList','recordingInfo','voiceReply',
-  'monitorEnabled','estimateRows','supplyTotal','vatTotal','grandTotal','chat','serverBase',
+  'monitorEnabled','callHistoryEnabled','estimateRows','supplyTotal','vatTotal','grandTotal','chat','serverBase',
   'accessCode'];
 const elements = Object.fromEntries(ids.map(id => [id, {innerHTML:'', textContent:'', value:'',
   className:'', scrollTop:0, scrollHeight:200, checked:false}]));

@@ -25,7 +25,19 @@ public class CallRecordingWorker extends Worker {
     public Result doWork() {
         Context ctx = getApplicationContext();
         SharedPreferences p = ctx.getSharedPreferences("119fire_native", Context.MODE_PRIVATE);
-        if (!p.getBoolean("monitor_enabled", false)) return Result.success();
+        boolean recordingMonitor = p.getBoolean("monitor_enabled", false);
+        boolean callHistoryMonitor = p.getBoolean("call_history_enabled", false);
+        if (!recordingMonitor && !callHistoryMonitor) return Result.success();
+
+        try {
+            if (callHistoryMonitor) PhoneCallHistorySync.sync(ctx);
+        } catch (SecurityException ignored) {
+            p.edit().putBoolean("call_history_enabled", false).apply();
+        } catch (Exception ignored) {
+            // A call-log refresh failure must not stop recording-folder detection.
+        }
+
+        if (!recordingMonitor) return Result.success();
 
         String raw = p.getString("call_folder_uri", "");
         if (raw.isEmpty()) return Result.success();

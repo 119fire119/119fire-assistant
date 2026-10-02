@@ -261,6 +261,7 @@ public abstract class WorkDatabase extends RoomDatabase {
         @Query("UPDATE Task SET status='완료', completedAt=:now WHERE id=:id") void completeTask(long id, long now);
         @Query("UPDATE Site SET status=:status, workNote=:note, updatedAt=:now WHERE id=:id") void finishSite(long id, String status, String note, long now);
         @Query("UPDATE Site SET workNote=:note, updatedAt=:now WHERE id=:id") void updateSiteNote(long id, String note, long now);
+        @Query("UPDATE Photo SET category=:category WHERE id=:id") void updatePhotoCategory(long id, String category);
         @Query("UPDATE CallRecord SET processingStatus=:status, transcript=:transcript, summary=:summary, analyzedAt=:now WHERE id=:id") void updateCallAnalysis(long id, String status, String transcript, String summary, long now);
         @Query("SELECT * FROM Payment WHERE balance>0 ORDER BY balance DESC LIMIT :limit") List<Payment> receivables(int limit);
     }

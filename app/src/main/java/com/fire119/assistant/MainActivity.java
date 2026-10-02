@@ -61,6 +61,7 @@ public class MainActivity extends Activity {
     private static final int REQ_CAMERA_PERMISSION = 1102;
     private static final int REQ_FOLDER = 1103;
     private static final int REQ_NOTIFICATION = 1104;
+    private static final int REQ_CALL_HISTORY = 1106;
 
     private WebView webView;
     private SharedPreferences prefs;
@@ -112,6 +113,10 @@ public class MainActivity extends Activity {
         webView.setWebChromeClient(new WebChromeClient());
         webView.addJavascriptInterface(new NativeBridge(), "Native");
         webView.loadUrl("file:///android_asset/index.html");
+        if (prefs.getBoolean("call_history_enabled", false) &&
+                checkSelfPermission(Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED) {
+            syncPhoneCallHistoryAsync();
+        }
     }
 
     private void applySystemInsetsToPage() {
@@ -137,6 +142,8 @@ public class MainActivity extends Activity {
             o.put("voiceReply", prefs.getBoolean("voice_reply", true));
             o.put("calendarConnected", prefs.getBoolean("calendar_enabled", false));
             o.put("driveBackup", prefs.getBoolean("drive_backup_enabled", false));
+            o.put("callHistoryEnabled", prefs.getBoolean("call_history_enabled", false));
+            o.put("callHistoryGranted", checkSelfPermission(Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED);
         } catch (Exception ignored) {}
         return o;
     }
@@ -228,9 +235,37 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public void disableMonitor() {
-            WorkManager.getInstance(MainActivity.this).cancelUniqueWork("119fire_call_monitor");
+            if (!prefs.getBoolean("call_history_enabled", false))
+                WorkManager.getInstance(MainActivity.this).cancelUniqueWork("119fire_call_monitor");
             prefs.edit().putBoolean("monitor_enabled", false).apply();
             callJs("onNativeStatus", statusJson());
+        }
+
+        @JavascriptInterface
+        public void enableCallHistorySync() {
+            runOnUiThread(() -> {
+                if (checkSelfPermission(Manifest.permission.READ_CALL_LOG) != PackageManager.PERMISSION_GRANTED) {
+                    requestPermissions(new String[]{Manifest.permission.READ_CALL_LOG}, REQ_CALL_HISTORY);
+                    return;
+                }
+                prefs.edit().putBoolean("call_history_enabled", true).apply();
+                scheduleMonitor();
+                syncPhoneCallHistoryAsync();
+                callJs("onNativeStatus", statusJson());
+            });
+        }
+
+        @JavascriptInterface
+        public void disableCallHistorySync() {
+            prefs.edit().putBoolean("call_history_enabled", false).apply();
+            if (!prefs.getBoolean("monitor_enabled", false))
+                WorkManager.getInstance(MainActivity.this).cancelUniqueWork("119fire_call_monitor");
+            callJs("onNativeStatus", statusJson());
+        }
+
+        @JavascriptInterface
+        public void syncCallHistory() {
+            syncPhoneCallHistoryAsync();
         }
 
         @JavascriptInterface
@@ -513,6 +548,19 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
+        public String updatePhotoCategory(long photoId, String category) {
+            String clean = category == null ? "미분류" : category.trim();
+            if (!(clean.equals("공사 전") || clean.equals("공사 중") || clean.equals("공사 후") ||
+                    clean.equals("기타") || clean.equals("미분류"))) clean = "미분류";
+            try {
+                database.store().updatePhotoCategory(photoId, clean);
+                return result(true, "사진 분류를 저장했습니다.", photoId).toString();
+            } catch (Exception e) {
+                return result(false, "사진 분류 저장에 실패했습니다.", photoId).toString();
+            }
+        }
+
+        @JavascriptInterface
         public void startVoiceAssistant() {
             runOnUiThread(() -> {
                 if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
@@ -610,7 +658,24 @@ public class MainActivity extends Activity {
         JSONArray a = new JSONArray(); for (WorkDatabase.Photo x:items) try { JSONObject o=new JSONObject(); o.put("id",x.id);o.put("name",x.name);o.put("path",x.path);o.put("category",x.category);o.put("siteId",x.siteId);o.put("createdAt",x.createdAt);a.put(o);}catch(Exception ignored){} return a;
     }
     private JSONArray callsJson(java.util.List<WorkDatabase.CallRecord> items) {
-        JSONArray a = new JSONArray(); for (WorkDatabase.CallRecord x:items) try { JSONObject o=new JSONObject(); o.put("id",x.id);o.put("name",x.displayName);o.put("uri",x.sourceUri);o.put("size",x.fileSize);o.put("modified",x.modifiedAt);o.put("status",x.processingStatus);o.put("summary",x.summary);a.put(o);}catch(Exception ignored){} return a;
+        JSONArray a = new JSONArray(); for (WorkDatabase.CallRecord x:items) try { JSONObject o=new JSONObject(); o.put("id",x.id);o.put("name",x.displayName);o.put("uri",x.sourceUri);o.put("size",x.fileSize);o.put("modified",x.modifiedAt);o.put("phone",x.phone);o.put("status",x.processingStatus);o.put("summary",x.summary);o.put("kind",x.sourceUri.startsWith("calllog:")?"통화기록":"통화녹음");a.put(o);}catch(Exception ignored){} return a;
+    }
+
+    private void syncPhoneCallHistoryAsync() {
+        new Thread(() -> {
+            JSONObject out = new JSONObject();
+            try {
+                int count = PhoneCallHistorySync.sync(MainActivity.this);
+                out.put("ok", true);
+                out.put("count", count);
+                out.put("message", count == 0 ? "새 통화기록이 없습니다." : count + "건의 기존 통화기록을 연결했습니다.");
+            } catch (SecurityException e) {
+                try { out.put("ok", false); out.put("error", "전화기록 접근 권한을 허용해주세요."); } catch (Exception ignored) {}
+            } catch (Exception e) {
+                try { out.put("ok", false); out.put("error", "전화기록을 불러오지 못했습니다."); } catch (Exception ignored) {}
+            }
+            callJs("onCallHistorySynced", out);
+        }).start();
     }
 
     private void beginVoiceRecognition() {
@@ -791,6 +856,7 @@ public class MainActivity extends Activity {
                 } else siteId = site.id;
                 WorkDatabase.Photo photo = new WorkDatabase.Photo();
                 photo.siteId = siteId; photo.path = pendingPhoto.getAbsolutePath(); photo.name = pendingPhoto.getName();
+                photo.category = "미분류";
                 photo.createdAt = System.currentTimeMillis();
                 store.insertPhoto(photo);
                 o.put("ok", true);
@@ -813,6 +879,13 @@ public class MainActivity extends Activity {
         }
         if (req == REQ_NOTIFICATION) {
             scheduleMonitor();
+        }
+        if (req == REQ_CALL_HISTORY && results.length > 0 &&
+                results[0] == PackageManager.PERMISSION_GRANTED) {
+            prefs.edit().putBoolean("call_history_enabled", true).apply();
+            scheduleMonitor();
+            syncPhoneCallHistoryAsync();
+            callJs("onNativeStatus", statusJson());
         }
         if (req == 1105 && results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) {
             beginVoiceRecognition();
