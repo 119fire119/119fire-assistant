@@ -6,7 +6,8 @@ const script = fs.readFileSync(new URL('../app/src/main/assets/app.js', import.m
 const ids = ['toast','todayLabel','metrics','briefing','priorityTasks','recentWork','inquiryList',
   'siteList','finishSiteSelect','photoList','estimateList','recordingInfo','voiceReply',
   'monitorEnabled','callHistoryEnabled','estimateRows','supplyTotal','vatTotal','grandTotal','chat','serverBase',
-  'accessCode','stageGrid','attentionList','attentionCard','priorityCard','favoriteItems','estimateNotes','photoSyncEnabled'];
+  'accessCode','stageGrid','attentionList','attentionCard','priorityCard','favoriteItems','estimateNotes','photoSyncEnabled',
+  'assistantState','automationCard','automationRecent','backgroundAssistantEnabled','driveBackupEnabled'];
 const elements = Object.fromEntries(ids.map(id => [id, {innerHTML:'', textContent:'', value:'',
   className:'', scrollTop:0, scrollHeight:200, checked:false, classList:{toggle:()=>{}}}]));
 const data = {inquiries:[],sites:[],tasks:[],estimates:[],photos:[],calls:[],status:{}};

@@ -30,7 +30,7 @@ import java.util.List;
         WorkDatabase.AIAnalysis.class, WorkDatabase.AutomationJob.class,
         WorkDatabase.VoiceMemo.class, WorkDatabase.EstimateVersion.class,
         WorkDatabase.EstimateFavorite.class, WorkDatabase.EstimateNoteTemplate.class
-}, version = 2, exportSchema = false)
+}, version = 3, exportSchema = false)
 public abstract class WorkDatabase extends RoomDatabase {
     private static volatile WorkDatabase instance;
     public abstract Store store();
@@ -38,7 +38,7 @@ public abstract class WorkDatabase extends RoomDatabase {
     public static WorkDatabase get(Context context) {
         if (instance == null) synchronized (WorkDatabase.class) {
             if (instance == null) instance = Room.databaseBuilder(context.getApplicationContext(), WorkDatabase.class,
-                    "119fire_work_v2.db").addMigrations(MIGRATION_1_2).build();
+                    "119fire_work_v2.db").addMigrations(MIGRATION_1_2, MIGRATION_2_3).build();
         }
         return instance;
     }
@@ -62,6 +62,14 @@ public abstract class WorkDatabase extends RoomDatabase {
             db.execSQL("CREATE INDEX IF NOT EXISTS `index_EstimateVersion_estimateId` ON `EstimateVersion` (`estimateId`)");
             db.execSQL("CREATE TABLE IF NOT EXISTS `EstimateFavorite` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `name` TEXT NOT NULL, `specification` TEXT NOT NULL, `unit` TEXT NOT NULL, `unitPrice` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL)");
             db.execSQL("CREATE TABLE IF NOT EXISTS `EstimateNoteTemplate` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `title` TEXT NOT NULL, `body` TEXT NOT NULL, `createdAt` INTEGER NOT NULL)");
+        }
+    };
+
+    /** Drive IDs are an index only; original files remain in the user's existing Drive folders. */
+    private static final Migration MIGRATION_2_3 = new Migration(2, 3) {
+        @Override public void migrate(SupportSQLiteDatabase db) {
+            db.execSQL("ALTER TABLE Site ADD COLUMN driveFolderId TEXT NOT NULL DEFAULT ''");
+            db.execSQL("ALTER TABLE Photo ADD COLUMN driveFileId TEXT NOT NULL DEFAULT ''");
         }
     };
 
@@ -105,6 +113,7 @@ public abstract class WorkDatabase extends RoomDatabase {
         public long startedAt = 0;
         public long finishedAt = 0;
         public String revisitNote = "";
+        public String driveFolderId = "";
         public long createdAt = System.currentTimeMillis();
         public long updatedAt = System.currentTimeMillis();
     }
@@ -208,6 +217,7 @@ public abstract class WorkDatabase extends RoomDatabase {
         public String category = "기타";
         public boolean faceBlurReview = false;
         public String backupStatus = "대기";
+        public String driveFileId = "";
         public long createdAt = System.currentTimeMillis();
     }
 
@@ -332,6 +342,7 @@ public abstract class WorkDatabase extends RoomDatabase {
         @Query("SELECT * FROM Estimate WHERE title=:title ORDER BY createdAt DESC LIMIT 1") Estimate latestEstimateByTitle(String title);
         @Query("SELECT * FROM EstimateItem WHERE estimateId=:estimateId ORDER BY sortOrder ASC") List<EstimateItem> estimateItems(long estimateId);
         @Query("SELECT * FROM Photo ORDER BY createdAt DESC LIMIT :limit") List<Photo> photos(int limit);
+        @Query("SELECT * FROM Photo WHERE id=:id LIMIT 1") Photo photoById(long id);
         @Query("SELECT * FROM CallRecord ORDER BY modifiedAt DESC LIMIT :limit") List<CallRecord> calls(int limit);
         @Query("SELECT * FROM CallRecord WHERE processingStatus='대기' ORDER BY modifiedAt ASC LIMIT :limit") List<CallRecord> pendingCalls(int limit);
         @Query("SELECT * FROM Inquiry WHERE customerId=:customerId ORDER BY updatedAt DESC LIMIT :limit") List<Inquiry> inquiriesByCustomer(long customerId, int limit);
@@ -365,6 +376,8 @@ public abstract class WorkDatabase extends RoomDatabase {
         @Query("UPDATE Site SET startedAt=CASE WHEN startedAt=0 THEN :now ELSE startedAt END, updatedAt=:now WHERE id=:id") void markSiteStarted(long id, long now);
         @Query("UPDATE Photo SET category=:category WHERE id=:id") void updatePhotoCategory(long id, String category);
         @Query("UPDATE Photo SET siteId=:siteId, category=:category WHERE id=:id") void assignPhotoToSite(long id, long siteId, String category);
+        @Query("UPDATE Photo SET backupStatus=:status, driveFileId=:driveFileId WHERE id=:id") void updatePhotoBackup(long id, String status, String driveFileId);
+        @Query("UPDATE Site SET driveFolderId=:folderId, updatedAt=:now WHERE id=:id") void updateSiteDriveFolder(long id, String folderId, long now);
         @Query("UPDATE CallRecord SET processingStatus=:status, transcript=:transcript, summary=:summary, analyzedAt=:now WHERE id=:id") void updateCallAnalysis(long id, String status, String transcript, String summary, long now);
         @Query("UPDATE Customer SET name=CASE WHEN :name='' THEN name ELSE :name END, company=CASE WHEN :company='' THEN company ELSE :company END, contactName=CASE WHEN :contactName='' THEN contactName ELSE :contactName END, region=CASE WHEN :region='' THEN region ELSE :region END, address=CASE WHEN :address='' THEN address ELSE :address END, updatedAt=:now WHERE id=:id") void updateCustomerProfile(long id, String name, String company, String contactName, String region, String address, long now);
         @Query("UPDATE Estimate SET status=:status, followUpAt=:followUpAt, updatedAt=:now WHERE id=:id") void updateEstimateStatus(long id, String status, String followUpAt, long now);

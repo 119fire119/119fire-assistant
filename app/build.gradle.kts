@@ -11,8 +11,8 @@ android {
         applicationId = "com.fire119.assistant"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "3.0-ai-field-assistant"
+        versionCode = 4
+        versionName = "3.1-background-assistant"
     }
 
     buildTypes {

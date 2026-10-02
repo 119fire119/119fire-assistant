@@ -121,6 +121,10 @@ public class MainActivity extends Activity {
         if (prefs.getBoolean("photo_sync_enabled", false) && MediaStorePhotoSync.hasPermission(this)) {
             syncCameraPhotosAsync();
         }
+        if (prefs.getBoolean("background_assistant_enabled", false)) {
+            try { BackgroundAssistantService.start(this); } catch (Exception ignored) { }
+        }
+        maybeStartVoiceFromIntent(getIntent());
     }
 
     private void applySystemInsetsToPage() {
@@ -129,6 +133,22 @@ public class MainActivity extends Activity {
                 systemTopInset + "px');document.documentElement.style.setProperty('--safe-bottom','" +
                 systemBottomInset + "px');";
         webView.post(() -> webView.evaluateJavascript(script, null));
+    }
+
+    /** Notification action opens the visible activity before any microphone access begins. */
+    private void maybeStartVoiceFromIntent(Intent intent) {
+        if (intent == null || !intent.getBooleanExtra(BackgroundAssistantService.EXTRA_START_VOICE, false)) return;
+        intent.removeExtra(BackgroundAssistantService.EXTRA_START_VOICE);
+        webView.postDelayed(() -> {
+            if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED) beginVoiceRecognition();
+            else requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, 1105);
+        }, 350);
+    }
+
+    @Override protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        maybeStartVoiceFromIntent(intent);
     }
 
     private void callJs(String fn, JSONObject payload) {
@@ -150,6 +170,9 @@ public class MainActivity extends Activity {
             o.put("callHistoryGranted", checkSelfPermission(Manifest.permission.READ_CALL_LOG) == PackageManager.PERMISSION_GRANTED);
             o.put("photoSyncEnabled", prefs.getBoolean("photo_sync_enabled", false));
             o.put("photoSyncGranted", MediaStorePhotoSync.hasPermission(MainActivity.this));
+            o.put("backgroundAssistantEnabled", prefs.getBoolean("background_assistant_enabled", false));
+            o.put("wakeWordAvailable", false);
+            o.put("recentActions", AutomationLog.recent(MainActivity.this, 6));
         } catch (Exception ignored) {}
         return o;
     }
@@ -202,6 +225,7 @@ public class MainActivity extends Activity {
                                 job.type = "AI_ANALYZE_CALL"; job.dedupeKey = "call:" + call.sourceUri;
                                 job.payloadJson = new JSONObject().put("callId", callId).put("uri", call.sourceUri).toString();
                                 database.store().insertJob(job);
+                                CallAnalysisWorker.enqueue(MainActivity.this, callId);
                             }
                         }
                         JSONObject x = new JSONObject();
@@ -214,6 +238,7 @@ public class MainActivity extends Activity {
                         if (++count >= 30) break;
                     }
                     prefs.edit().putLong("last_scan", System.currentTimeMillis()).apply();
+                    if (arr.length() > 0) AutomationLog.add(MainActivity.this, "통화녹음 폴더를 확인했습니다.");
                     out.put("ok", true);
                     out.put("files", arr);
                 } catch (Exception e) {
@@ -244,6 +269,30 @@ public class MainActivity extends Activity {
             if (!prefs.getBoolean("call_history_enabled", false) && !prefs.getBoolean("photo_sync_enabled", false))
                 WorkManager.getInstance(MainActivity.this).cancelUniqueWork("119fire_call_monitor");
             prefs.edit().putBoolean("monitor_enabled", false).apply();
+            callJs("onNativeStatus", statusJson());
+        }
+
+        /** Visible, user-enabled background automation. It never records continuously. */
+        @JavascriptInterface
+        public void enableBackgroundAssistant() {
+            runOnUiThread(() -> {
+                if (android.os.Build.VERSION.SDK_INT >= 33 &&
+                        checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                    requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, REQ_NOTIFICATION);
+                }
+                prefs.edit().putBoolean("background_assistant_enabled", true).putBoolean("monitor_enabled", true).apply();
+                scheduleMonitor();
+                try { BackgroundAssistantService.start(MainActivity.this); }
+                catch (Exception e) { Toast.makeText(MainActivity.this, "자동비서를 시작하지 못했습니다.", Toast.LENGTH_SHORT).show(); }
+                callJs("onNativeStatus", statusJson());
+            });
+        }
+
+        @JavascriptInterface
+        public void disableBackgroundAssistant() {
+            prefs.edit().putBoolean("background_assistant_enabled", false).apply();
+            BackgroundAssistantService.stop(MainActivity.this);
+            AutomationLog.add(MainActivity.this, "백그라운드 비서를 껐습니다.");
             callJs("onNativeStatus", statusJson());
         }
 
@@ -299,6 +348,34 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public void syncCameraPhotos() { syncCameraPhotosAsync(); }
+
+        /** Device-only commands are handled before free-form questions go to the AI server. */
+        @JavascriptInterface
+        public String routeAssistantCommand(String message) {
+            String m = message == null ? "" : message.replace(" ", "").trim();
+            JSONObject out = new JSONObject();
+            try {
+                if ((m.contains("방금") || m.contains("오늘") || m.contains("아까")) && m.contains("사진") && (m.contains("정리") || m.contains("올려"))) {
+                    syncCameraPhotosAsync();
+                    AutomationLog.add(MainActivity.this, "음성 명령으로 최근 카메라 사진 확인을 시작했습니다.");
+                    out.put("handled", true); out.put("reply", "최근 삼성 카메라 사진을 확인하고 있습니다. 현장이 하나로 명확하면 자동 연결하고, 애매하면 확인할 것에 남길게요.");
+                    return out.toString();
+                }
+                if ((m.contains("방금") || m.contains("아까")) && m.contains("통화") && (m.contains("정리") || m.contains("견적"))) {
+                    scanRecordings();
+                    AutomationLog.add(MainActivity.this, "음성 명령으로 최근 통화녹음 확인을 시작했습니다.");
+                    out.put("handled", true); out.put("reply", "최근 삼성 통화녹음을 확인해 대기열에 넣었습니다. 서버 연결이 되어 있으면 새 녹음은 네트워크가 될 때 AI 전사를 시작합니다.");
+                    return out.toString();
+                }
+                if (m.contains("오늘") && (m.contains("남았") || m.contains("일정") || m.contains("정리"))) {
+                    WorkDatabase.Store store = database.store();
+                    out.put("handled", true); out.put("reply", "오늘 기준 미처리 할 일 " + store.openTaskCount() + "건, 새 통화 분석 " + store.waitingCallCount() + "건, 확인할 것 " + store.inboxCount() + "건입니다.");
+                    return out.toString();
+                }
+                out.put("handled", false);
+            } catch (Exception e) { try { out.put("handled", false); } catch (Exception ignored) {} }
+            return out.toString();
+        }
 
         @JavascriptInterface
         public String assignPhotoToSite(long photoId, long siteId, String category) {
@@ -407,6 +484,7 @@ public class MainActivity extends Activity {
                 attention.put("inbox", store.inboxCount());
                 out.put("attention", attention);
                 out.put("inbox", jobsJson(store.inboxJobs(20)));
+                out.put("status", statusJson());
             } catch (Exception e) {
                 try { out.put("error", "업무 데이터를 불러오지 못했습니다."); } catch (Exception ignored) {}
             }
@@ -739,6 +817,14 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void setVoiceReply(boolean enabled) { prefs.edit().putBoolean("voice_reply", enabled).apply(); }
 
+        /** Enables the local upload queue. Actual upload succeeds only after the documented OAuth setup. */
+        @JavascriptInterface
+        public String setDriveBackup(boolean enabled) {
+            prefs.edit().putBoolean("drive_backup_enabled", enabled).apply();
+            if (enabled) AutomationLog.add(MainActivity.this, "Google Drive 사진 업로드 대기열을 켰습니다.");
+            return result(true, enabled ? "Drive 업로드 대기열을 켰습니다. OAuth 설정 전 사진은 연결 대기로 남습니다." : "Drive 업로드 대기열을 껐습니다.", 0).toString();
+        }
+
         @JavascriptInterface
         public void saveServerConnection(String serverBase, String accessCode) {
             prefs.edit().putString("server_base", serverBase == null ? "" : serverBase.trim())
@@ -945,7 +1031,7 @@ public class MainActivity extends Activity {
         JSONArray a = new JSONArray(); for (WorkDatabase.Inquiry x:items) try { JSONObject o=new JSONObject(); o.put("id",x.id);o.put("title",x.title);o.put("content",x.content);o.put("status",x.status);o.put("source",x.source);o.put("siteId",x.siteId);o.put("customerId",x.customerId);o.put("updatedAt",x.updatedAt);a.put(o);}catch(Exception ignored){} return a;
     }
     private JSONArray sitesJson(java.util.List<WorkDatabase.Site> items) {
-        JSONArray a = new JSONArray(); for (WorkDatabase.Site x:items) try { JSONObject o=new JSONObject(); o.put("id",x.id);o.put("name",x.name);o.put("address",x.address);o.put("status",x.status);o.put("workNote",x.workNote);o.put("customerId",x.customerId);o.put("visitAt",x.visitAt);o.put("startedAt",x.startedAt);o.put("finishedAt",x.finishedAt);o.put("revisitNote",x.revisitNote);o.put("updatedAt",x.updatedAt);a.put(o);}catch(Exception ignored){} return a;
+        JSONArray a = new JSONArray(); for (WorkDatabase.Site x:items) try { JSONObject o=new JSONObject(); o.put("id",x.id);o.put("name",x.name);o.put("address",x.address);o.put("status",x.status);o.put("workNote",x.workNote);o.put("customerId",x.customerId);o.put("visitAt",x.visitAt);o.put("startedAt",x.startedAt);o.put("finishedAt",x.finishedAt);o.put("revisitNote",x.revisitNote);o.put("driveFolderId",x.driveFolderId);o.put("updatedAt",x.updatedAt);a.put(o);}catch(Exception ignored){} return a;
     }
     private JSONArray tasksJson(java.util.List<WorkDatabase.Task> items) {
         JSONArray a = new JSONArray(); for (WorkDatabase.Task x:items) try { JSONObject o=new JSONObject(); o.put("id",x.id);o.put("title",x.title);o.put("dueAt",x.dueAt);o.put("status",x.status);o.put("source",x.source);o.put("siteId",x.siteId);o.put("requiresConfirmation",x.requiresConfirmation);a.put(o);}catch(Exception ignored){} return a;
@@ -954,7 +1040,7 @@ public class MainActivity extends Activity {
         JSONArray a = new JSONArray(); for (WorkDatabase.Estimate x:items) try { JSONObject o=new JSONObject(); o.put("id",x.id);o.put("title",x.title);o.put("version",x.version);o.put("supplyAmount",x.supplyAmount);o.put("vat",x.vat);o.put("total",x.total);o.put("status",x.status);o.put("siteId",x.siteId);a.put(o);}catch(Exception ignored){} return a;
     }
     private JSONArray photosJson(java.util.List<WorkDatabase.Photo> items) {
-        JSONArray a = new JSONArray(); for (WorkDatabase.Photo x:items) try { JSONObject o=new JSONObject(); o.put("id",x.id);o.put("name",x.name);o.put("path",x.path);o.put("category",x.category);o.put("siteId",x.siteId);o.put("createdAt",x.createdAt);a.put(o);}catch(Exception ignored){} return a;
+        JSONArray a = new JSONArray(); for (WorkDatabase.Photo x:items) try { JSONObject o=new JSONObject(); o.put("id",x.id);o.put("name",x.name);o.put("path",x.path);o.put("category",x.category);o.put("siteId",x.siteId);o.put("backupStatus",x.backupStatus);o.put("driveFileId",x.driveFileId);o.put("createdAt",x.createdAt);a.put(o);}catch(Exception ignored){} return a;
     }
     private JSONArray callsJson(java.util.List<WorkDatabase.CallRecord> items) {
         JSONArray a = new JSONArray(); for (WorkDatabase.CallRecord x:items) try { JSONObject o=new JSONObject(); o.put("id",x.id);o.put("name",x.displayName);o.put("uri",x.sourceUri);o.put("size",x.fileSize);o.put("modified",x.modifiedAt);o.put("phone",x.phone);o.put("status",x.processingStatus);o.put("summary",x.summary);o.put("kind",x.sourceUri.startsWith("calllog:")?"통화기록":"통화녹음");a.put(o);}catch(Exception ignored){} return a;
@@ -1205,7 +1291,9 @@ public class MainActivity extends Activity {
                 photo.siteId = siteId; photo.path = pendingPhoto.getAbsolutePath(); photo.name = pendingPhoto.getName();
                 photo.category = "미분류";
                 photo.createdAt = System.currentTimeMillis();
-                store.insertPhoto(photo);
+                long photoId = store.insertPhoto(photo);
+                if (photoId > 0 && prefs.getBoolean("drive_backup_enabled", false)) DrivePhotoUploadWorker.enqueue(MainActivity.this, photoId);
+                AutomationLog.add(MainActivity.this, pendingJobName + " 현장 사진 1장을 저장했습니다.");
                 o.put("ok", true);
                 o.put("jobName", pendingJobName);
                 o.put("siteId", siteId);

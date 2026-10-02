@@ -83,6 +83,7 @@ public class CallRecordingWorker extends Worker {
                             job.type = "AI_ANALYZE_CALL"; job.dedupeKey = "call:" + call.sourceUri;
                             job.payloadJson = "{\"callId\":" + id + "}";
                             store.insertJob(job);
+                            CallAnalysisWorker.enqueue(ctx, id);
                             count++;
                         }
                     }
@@ -90,7 +91,10 @@ public class CallRecordingWorker extends Worker {
                 }
             }
 
-            if (count > 0) notifyNew(ctx, count);
+            if (count > 0) {
+                notifyNew(ctx, count);
+                AutomationLog.add(ctx, "새 통화녹음 " + count + "건을 발견해 AI 대기열에 넣었습니다.");
+            }
             p.edit().putLong("monitor_last_seen", Math.max(newest, System.currentTimeMillis()-1000)).apply();
             return Result.success();
         } catch (Exception e) {

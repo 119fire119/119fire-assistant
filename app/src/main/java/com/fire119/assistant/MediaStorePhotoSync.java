@@ -74,11 +74,17 @@ public final class MediaStorePhotoSync {
                     review.status = "확인필요"; store.insertJob(review);
                 }
                 // Photo.path has a unique index, so a repeated media scan cannot duplicate this row.
-                if (store.insertPhoto(photo) > 0) imported++;
+                long inserted = store.insertPhoto(photo);
+                if (inserted > 0) {
+                    imported++;
+                    if (photo.siteId != null && prefs.getBoolean("drive_backup_enabled", false))
+                        DrivePhotoUploadWorker.enqueue(context, inserted);
+                }
                 newest = Math.max(newest, taken);
             }
         }
         prefs.edit().putLong("photo_last_seen", Math.max(newest, System.currentTimeMillis() - 1000L)).apply();
+        if (imported > 0) AutomationLog.add(context, "삼성 카메라 새 사진 " + imported + "장을 확인했습니다.");
         return imported;
     }
 
