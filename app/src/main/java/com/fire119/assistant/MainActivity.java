@@ -677,8 +677,54 @@ public class MainActivity extends Activity {
                 value.name = name; value.specification = in.optString("specification", "").trim();
                 value.unit = valueOr(in.optString("unit", ""), "개"); value.unitPrice = in.optLong("unitPrice", 0);
                 long id = database.store().insertEstimateFavorite(value);
-                return result(true, "자주 쓰는 품목을 저장했습니다.", id).toString();
+                int updated = applySavedPricesToPendingEstimates();
+                return result(true, "저장 단가를 등록했습니다." + (updated > 0 ? " 대기 중인 자동 초안 " + updated + "건에 반영했습니다." : ""), id).put("updatedDrafts", updated).toString();
             } catch (Exception e) { return result(false, "품목 저장에 실패했습니다.", 0).toString(); }
+        }
+
+        private int applySavedPricesToPendingEstimates() {
+            WorkDatabase.Store store = database.store();
+            java.util.List<WorkDatabase.EstimateFavorite> favorites = store.estimateFavorites(200);
+            int updated = 0;
+            for (WorkDatabase.Estimate estimate : store.estimates(200)) {
+                if (!"단가 확인 필요".equals(estimate.status)) continue;
+                java.util.List<WorkDatabase.EstimateItem> rows = store.estimateItems(estimate.id);
+                boolean changed = false; boolean needsPrice = false; long supply = 0;
+                JSONArray snapshotItems = new JSONArray();
+                try {
+                    for (int i=0;i<rows.size();i++) {
+                        WorkDatabase.EstimateItem row=rows.get(i);
+                        if (row.unitPrice <= 0) {
+                            WorkDatabase.EstimateFavorite match=null;
+                            String key=row.name.replace(" ", "");
+                            for (WorkDatabase.EstimateFavorite favorite:favorites) {
+                                if (favorite.unitPrice<=0 || !favorite.name.replace(" ", "").equals(key)) continue;
+                                if (match!=null) { match=null; break; }
+                                match=favorite;
+                            }
+                            if (match!=null) {
+                                row.unitPrice=match.unitPrice; row.specification=match.specification;
+                                row.amount=Math.round(row.quantity*row.unitPrice);
+                                store.updateEstimateItemPrice(row.id,row.unitPrice,row.amount); changed=true;
+                            }
+                        }
+                        if (row.unitPrice<=0) needsPrice=true; else supply+=row.amount;
+                        JSONObject item=new JSONObject(); item.put("name",row.name);item.put("specification",row.specification);
+                        item.put("quantity",row.quantity);item.put("unitPrice",row.unitPrice);item.put("amount",row.amount);snapshotItems.put(item);
+                    }
+                    if (!changed) continue;
+                    long vat=Math.round(supply*.1); int nextVersion=estimate.version+1; long now=System.currentTimeMillis();
+                    String status=needsPrice?"단가 확인 필요":"견적 작성";
+                    store.updateEstimateAmounts(estimate.id,supply,vat,supply+vat,status,nextVersion,now);
+                    WorkDatabase.EstimateVersion version=new WorkDatabase.EstimateVersion();version.estimateId=estimate.id;version.version=nextVersion;
+                    JSONObject snapshot=new JSONObject();
+                    java.util.List<WorkDatabase.EstimateVersion> old=store.estimateVersions(estimate.id);
+                    if(!old.isEmpty())try{JSONObject previous=new JSONObject(old.get(0).snapshotJson);if(previous.has("sourceCallId"))snapshot.put("sourceCallId",previous.getLong("sourceCallId"));}catch(Exception ignored){}
+                    snapshot.put("source","저장 단가 자동 적용");snapshot.put("items",snapshotItems);snapshot.put("total",supply+vat);version.snapshotJson=snapshot.toString();
+                    version.noteText=needsPrice?"저장 단가 적용; 일부 품목은 확인 필요":"저장 단가 적용; 합계 최종 확인 필요";store.insertEstimateVersion(version);updated++;
+                } catch (Exception ignored) { }
+            }
+            return updated;
         }
 
         @JavascriptInterface

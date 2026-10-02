@@ -373,6 +373,8 @@ public abstract class WorkDatabase extends RoomDatabase {
         @Query("SELECT COUNT(DISTINCT Photo.siteId) FROM Photo INNER JOIN Site ON Site.id=Photo.siteId WHERE Site.workNote='' OR Site.workNote IS NULL") int photoOnlySiteCount();
         @Query("SELECT COUNT(*) FROM Payment INNER JOIN Site ON Site.id=Payment.siteId WHERE Payment.balance>0 AND Site.status='공사완료'") int completedUnpaidSiteCount();
         @Query("UPDATE Task SET status='완료', completedAt=:now WHERE id=:id") void completeTask(long id, long now);
+        @Query("UPDATE EstimateItem SET unitPrice=:unitPrice, amount=:amount WHERE id=:id") void updateEstimateItemPrice(long id, long unitPrice, long amount);
+        @Query("UPDATE Estimate SET supplyAmount=:supply, vat=:vat, total=:total, status=:status, version=:version, updatedAt=:now WHERE id=:id") void updateEstimateAmounts(long id, long supply, long vat, long total, String status, int version, long now);
         @Query("UPDATE Site SET status=:status, workNote=:note, updatedAt=:now WHERE id=:id") void finishSite(long id, String status, String note, long now);
         @Query("UPDATE Site SET status=:status, workNote=:note, finishedAt=:now, updatedAt=:now WHERE id=:id") void confirmSiteComplete(long id, String status, String note, long now);
         @Query("UPDATE Site SET workNote=:note, updatedAt=:now WHERE id=:id") void updateSiteNote(long id, String note, long now);
