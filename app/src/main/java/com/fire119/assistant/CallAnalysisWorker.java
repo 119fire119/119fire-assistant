@@ -104,7 +104,7 @@ public final class CallAnalysisWorker extends Worker {
         }
     }
 
-    /** A draft is created only when the transcript gives exact quantities and every price matches one saved item. */
+    /** Builds a draft from confirmed call quantities; missing catalog prices stay explicitly unpriced. */
     private static void createEstimateDraftIfCertain(Context context, WorkDatabase.Store store,
                                                      WorkDatabase.CallRecord call, JSONObject analysis) {
         try {
@@ -112,34 +112,48 @@ public final class CallAnalysisWorker extends Worker {
             JSONArray requested = analysis.optJSONArray("estimateItems");
             JSONObject fields = analysis.optJSONObject("fields");
             String siteName = fields == null ? "" : fields.optString("siteName", "").trim();
-            if (requested == null || requested.length() == 0 || siteName.isEmpty() || siteName.equals("확인 필요")) return;
+            String estimateMention = fields == null ? "" : fields.optString("estimateMention", "").trim();
+            if ((estimateMention.isEmpty() || estimateMention.equals("없음") || estimateMention.equals("확인 필요"))
+                    && (requested == null || requested.length() == 0)) return;
+            if (requested == null || requested.length() == 0) {
+                addEstimateReview(store, call, "통화에서 견적 요청은 확인됐지만 품목과 수량을 확인할 수 없습니다."); return;
+            }
+            if (siteName.isEmpty() || siteName.equals("확인 필요")) {
+                addEstimateReview(store, call, "견적 현장명을 통화에서 확인할 수 없습니다."); return;
+            }
+            if (store.estimateVersionFromCall("\"sourceCallId\":" + call.id + ",") > 0) return;
             WorkDatabase.Site site = store.siteByName(siteName);
             if (site == null) { addEstimateReview(store, call, "견적 요청 현장명이 저장된 현장과 일치하지 않습니다."); return; }
-            JSONArray snapshot = new JSONArray(); long supply = 0;
+            JSONArray snapshot = new JSONArray(); long supply = 0; boolean needsPrice = false;
             java.util.List<WorkDatabase.EstimateFavorite> favorites = store.estimateFavorites(200);
             for (int i = 0; i < requested.length(); i++) {
                 JSONObject asked = requested.optJSONObject(i); if (asked == null) { addEstimateReview(store, call, "견적 품목 확인이 필요합니다."); return; }
                 String name = asked.optString("name", "").trim(); double quantity = asked.optDouble("quantity", 0);
                 WorkDatabase.EstimateFavorite selected = uniqueFavorite(favorites, name);
-                if (name.isEmpty() || quantity <= 0 || selected == null || selected.unitPrice <= 0) {
-                    addEstimateReview(store, call, "견적 단가 또는 수량 확인이 필요합니다."); return;
+                if (name.isEmpty() || quantity <= 0) {
+                    addEstimateReview(store, call, "통화에서 품목 또는 수량을 정확히 확인할 수 없습니다."); return;
                 }
-                JSONObject row = new JSONObject(); row.put("name", selected.name); row.put("specification", selected.specification);
-                row.put("quantity", quantity); row.put("unitPrice", selected.unitPrice); snapshot.put(row);
-                supply += Math.round(quantity * selected.unitPrice);
+                long unitPrice = selected == null ? 0 : selected.unitPrice;
+                String itemName = selected == null ? name : selected.name;
+                String specification = selected == null ? asked.optString("specification", "") : selected.specification;
+                if (unitPrice <= 0) needsPrice = true;
+                JSONObject row = new JSONObject(); row.put("name", itemName); row.put("specification", specification);
+                row.put("quantity", quantity); row.put("unitPrice", unitPrice); snapshot.put(row);
+                if (unitPrice > 0) supply += Math.round(quantity * unitPrice);
             }
             String title = site.name + " 견적서";
             WorkDatabase.Estimate previous = store.latestEstimateByTitle(title);
             WorkDatabase.Estimate estimate = new WorkDatabase.Estimate(); estimate.siteId = site.id; estimate.customerId = site.customerId;
             estimate.title = title; estimate.version = previous == null ? 1 : previous.version + 1;
             estimate.supplyAmount = supply; estimate.vat = Math.round(supply * .1); estimate.total = estimate.supplyAmount + estimate.vat;
-            estimate.status = "견적 작성"; estimate.updatedAt = System.currentTimeMillis(); long estimateId = store.insertEstimate(estimate);
+            estimate.status = needsPrice ? "단가 확인 필요" : "견적 작성"; estimate.updatedAt = System.currentTimeMillis(); long estimateId = store.insertEstimate(estimate);
             for (int i=0;i<snapshot.length();i++) { JSONObject row=snapshot.getJSONObject(i); WorkDatabase.EstimateItem item=new WorkDatabase.EstimateItem();
                 item.estimateId=estimateId;item.name=row.getString("name");item.specification=row.optString("specification","");item.quantity=row.getDouble("quantity");item.unitPrice=row.getLong("unitPrice");item.amount=Math.round(item.quantity*item.unitPrice);item.sortOrder=i;store.insertEstimateItem(item); }
             WorkDatabase.EstimateVersion version = new WorkDatabase.EstimateVersion(); version.estimateId=estimateId;version.version=estimate.version;
-            version.snapshotJson=new JSONObject().put("source","통화 AI 분석").put("items",snapshot).put("total",estimate.total).toString();
-            version.noteText="통화에서 확인된 수량과 저장 단가만 사용한 초안";store.insertEstimateVersion(version);
-            AutomationLog.add(context, site.name + " 견적 초안 V" + estimate.version + "을 만들었습니다. 금액 확인이 필요합니다.");
+            version.snapshotJson=new JSONObject().put("sourceCallId",call.id).put("source","통화 AI 분석").put("items",snapshot).put("total",estimate.total).toString();
+            version.noteText=needsPrice?"통화에서 확인된 품목·수량으로 자동 작성; 일부 단가 확인 필요":"통화에서 확인된 수량과 저장 단가로 자동 작성; 금액 최종 확인 필요";store.insertEstimateVersion(version);
+            if (needsPrice) addEstimateReview(store, call, "견적 초안은 만들었지만 저장되지 않은 품목 단가가 있습니다.");
+            AutomationLog.add(context, site.name + " 견적 초안 V" + estimate.version + (needsPrice ? "을 만들었습니다. 단가 확인이 필요합니다." : "을 자동 작성했습니다. 금액 확인이 필요합니다."));
         } catch (Exception ignored) { addEstimateReview(store, call, "통화 견적 초안 생성 중 확인이 필요합니다."); }
     }
     private static WorkDatabase.EstimateFavorite uniqueFavorite(java.util.List<WorkDatabase.EstimateFavorite> values,String asked) {

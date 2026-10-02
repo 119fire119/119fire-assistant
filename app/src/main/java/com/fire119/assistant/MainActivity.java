@@ -713,6 +713,9 @@ public class MainActivity extends Activity {
             try {
                 WorkDatabase.Estimate estimate = database.store().estimateById(estimateId);
                 if (estimate == null) return result(false, "견적서를 찾지 못했습니다.", estimateId).toString();
+                for (WorkDatabase.EstimateItem item : database.store().estimateItems(estimateId)) {
+                    if (item.unitPrice <= 0) return result(false, "저장 단가가 없는 품목이 있어 PDF를 만들 수 없습니다. 저장 단가를 등록한 뒤 통화 분석에서 다시 초안을 만들어주세요.", estimateId).toString();
+                }
                 PdfDocument.Page page = pdf.startPage(new PdfDocument.PageInfo.Builder(595, 842, 1).create());
                 Canvas canvas = page.getCanvas(); Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG); paint.setColor(0xff191b1f);
                 paint.setTextSize(24); paint.setFakeBoldText(true); canvas.drawText("119FIRE ESTIMATE", 42, 60, paint);
@@ -1125,7 +1128,7 @@ public class MainActivity extends Activity {
         JSONArray a = new JSONArray(); for (WorkDatabase.Task x:items) try { JSONObject o=new JSONObject(); o.put("id",x.id);o.put("title",x.title);o.put("dueAt",x.dueAt);o.put("status",x.status);o.put("source",x.source);o.put("siteId",x.siteId);o.put("requiresConfirmation",x.requiresConfirmation);a.put(o);}catch(Exception ignored){} return a;
     }
     private JSONArray estimatesJson(java.util.List<WorkDatabase.Estimate> items) {
-        JSONArray a = new JSONArray(); for (WorkDatabase.Estimate x:items) try { JSONObject o=new JSONObject(); o.put("id",x.id);o.put("title",x.title);o.put("version",x.version);o.put("supplyAmount",x.supplyAmount);o.put("vat",x.vat);o.put("total",x.total);o.put("status",x.status);o.put("siteId",x.siteId);a.put(o);}catch(Exception ignored){} return a;
+        JSONArray a = new JSONArray(); for (WorkDatabase.Estimate x:items) try { boolean needsPrice=false; for(WorkDatabase.EstimateItem row:database.store().estimateItems(x.id))if(row.unitPrice<=0){needsPrice=true;break;} JSONObject o=new JSONObject(); o.put("id",x.id);o.put("title",x.title);o.put("version",x.version);o.put("supplyAmount",x.supplyAmount);o.put("vat",x.vat);o.put("total",x.total);o.put("status",x.status);o.put("siteId",x.siteId);o.put("needsPrice",needsPrice);a.put(o);}catch(Exception ignored){} return a;
     }
     private JSONArray photosJson(java.util.List<WorkDatabase.Photo> items) {
         JSONArray a = new JSONArray(); for (WorkDatabase.Photo x:items) try { JSONObject o=new JSONObject(); o.put("id",x.id);o.put("name",x.name);o.put("path",x.path);o.put("category",x.category);o.put("siteId",x.siteId);o.put("backupStatus",x.backupStatus);o.put("driveFileId",x.driveFileId);o.put("createdAt",x.createdAt);a.put(o);}catch(Exception ignored){} return a;

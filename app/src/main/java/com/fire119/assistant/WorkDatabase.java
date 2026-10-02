@@ -357,6 +357,7 @@ public abstract class WorkDatabase extends RoomDatabase {
         @Query("SELECT * FROM EstimateFavorite ORDER BY createdAt DESC LIMIT :limit") List<EstimateFavorite> estimateFavorites(int limit);
         @Query("SELECT * FROM EstimateNoteTemplate ORDER BY createdAt DESC LIMIT :limit") List<EstimateNoteTemplate> estimateNoteTemplates(int limit);
         @Query("SELECT * FROM EstimateVersion WHERE estimateId=:estimateId ORDER BY version DESC") List<EstimateVersion> estimateVersions(long estimateId);
+        @Query("SELECT COUNT(*) FROM EstimateVersion WHERE snapshotJson LIKE '%' || :sourceMarker || '%'") int estimateVersionFromCall(String sourceMarker);
         @Query("SELECT * FROM AutomationJob WHERE status IN ('확인필요','실패') ORDER BY updatedAt DESC LIMIT :limit") List<AutomationJob> inboxJobs(int limit);
         @Query("SELECT COUNT(*) FROM Inquiry") int inquiryCount();
         @Query("SELECT COUNT(*) FROM Task WHERE status!='완료'") int openTaskCount();
@@ -366,7 +367,7 @@ public abstract class WorkDatabase extends RoomDatabase {
         @Query("SELECT COUNT(*) FROM AutomationJob WHERE status IN ('확인필요','실패')") int inboxCount();
         @Query("SELECT COUNT(*) FROM Inquiry WHERE status=:status") int inquiryCountByStatus(String status);
         @Query("SELECT COUNT(*) FROM Site WHERE status=:status") int siteCountByStatus(String status);
-        @Query("SELECT COUNT(*) FROM Estimate WHERE status='견적 작성'") int unsentEstimateCount();
+        @Query("SELECT COUNT(*) FROM Estimate WHERE status IN ('견적 작성','단가 확인 필요')") int unsentEstimateCount();
         @Query("SELECT COUNT(*) FROM Estimate WHERE status='견적발송' AND followUpAt!='' AND followUpAt<=:now") int quoteFollowUpCount(String now);
         @Query("SELECT COUNT(*) FROM Inquiry WHERE status='신규문의'") int unansweredInquiryCount();
         @Query("SELECT COUNT(DISTINCT Photo.siteId) FROM Photo INNER JOIN Site ON Site.id=Photo.siteId WHERE Site.workNote='' OR Site.workNote IS NULL") int photoOnlySiteCount();
