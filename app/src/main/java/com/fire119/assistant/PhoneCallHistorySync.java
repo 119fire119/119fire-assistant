@@ -42,8 +42,7 @@ public final class PhoneCallHistorySync {
             int dateIndex = cursor.getColumnIndexOrThrow(CallLog.Calls.DATE);
             int durationIndex = cursor.getColumnIndexOrThrow(CallLog.Calls.DURATION);
             int typeIndex = cursor.getColumnIndexOrThrow(CallLog.Calls.TYPE);
-            int inspected = 0;
-            while (cursor.moveToNext() && inspected++ < 500) {
+            while (cursor.moveToNext()) {
                 long callLogId = cursor.getLong(idIndex);
                 String source = "calllog:" + callLogId;
                 if (store.callByUri(source) != null) continue;

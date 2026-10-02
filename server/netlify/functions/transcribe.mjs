@@ -30,8 +30,8 @@ export default async (request) => {
     const audio=form.get("audio");
     if(!audio || typeof audio.arrayBuffer!=="function")
       return new Response(JSON.stringify({error:"오디오 파일이 없습니다."}),{status:400,headers:H});
-    if(audio.size>5*1024*1024)
-      return new Response(JSON.stringify({error:"샘플 버전은 5MB 이하 파일만 지원합니다."}),{status:413,headers:H});
+    if(audio.size>4*1024*1024)
+      return new Response(JSON.stringify({error:"Netlify 업로드 제한으로 4MB 이하 오디오 파일만 전사할 수 있습니다."}),{status:413,headers:H});
 
     const fd=new FormData();
     fd.append("file",audio,audio.name||"call.m4a");

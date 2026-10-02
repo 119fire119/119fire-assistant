@@ -56,18 +56,7 @@ public class CallRecordingWorker extends Worker {
         int count = 0;
 
         try {
-            DocumentFile folder = DocumentFile.fromTreeUri(ctx, Uri.parse(raw));
-            if (folder == null || !folder.exists()) return Result.success();
-
-            for (DocumentFile f : folder.listFiles()) {
-                if (!f.isFile()) continue;
-                String mime = f.getType() == null ? "" : f.getType().toLowerCase();
-                String name = f.getName() == null ? "" : f.getName().toLowerCase();
-                boolean audio = mime.startsWith("audio/") ||
-                        name.endsWith(".m4a") || name.endsWith(".mp3") ||
-                        name.endsWith(".wav") || name.endsWith(".amr") ||
-                        name.endsWith(".3gp") || name.endsWith(".aac");
-                if (!audio) continue;
+            for (DocumentFile f : RecordingFolderScanner.scan(ctx, Uri.parse(raw), 2000)) {
 
                 long modified = f.lastModified();
                 if (modified > lastSeen) {

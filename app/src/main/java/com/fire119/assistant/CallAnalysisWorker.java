@@ -51,8 +51,8 @@ public final class CallAnalysisWorker extends Worker {
             Uri uri = Uri.parse(call.sourceUri);
             DocumentFile file = DocumentFile.fromSingleUri(context, uri);
             if (file == null || !file.exists()) throw new IllegalStateException("녹음파일을 찾지 못했습니다.");
-            if (file.length() > 5L * 1024L * 1024L) {
-                store.updateCallAnalysis(id, "확인 필요", "", "녹음파일이 커서 수동 분석이 필요합니다.", System.currentTimeMillis());
+            if (file.length() > 4L * 1024L * 1024L) {
+                store.updateCallAnalysis(id, "확인 필요", "", "Netlify 업로드 제한으로 4MB 초과 녹음은 자동 전사할 수 없습니다.", System.currentTimeMillis());
                 AutomationLog.add(context, "통화녹음 1건은 파일 크기 확인이 필요합니다.");
                 return Result.success();
             }

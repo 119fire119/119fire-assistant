@@ -49,8 +49,6 @@ import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
-import java.util.Arrays;
-import java.util.Comparator;
 import java.util.Date;
 import java.util.Locale;
 import java.util.ArrayList;
@@ -159,7 +157,15 @@ public class MainActivity extends Activity {
     private JSONObject statusJson() {
         JSONObject o = new JSONObject();
         try {
-            o.put("folderConnected", prefs.getString("call_folder_uri", "").length() > 0);
+            String folderUri = prefs.getString("call_folder_uri", "");
+            boolean folderConnected = false;
+            if (!folderUri.isEmpty()) {
+                try {
+                    DocumentFile folder = DocumentFile.fromTreeUri(MainActivity.this, Uri.parse(folderUri));
+                    folderConnected = folder != null && folder.exists() && folder.isDirectory() && folder.canRead();
+                } catch (Exception ignored) {}
+            }
+            o.put("folderConnected", folderConnected);
             o.put("monitorEnabled", prefs.getBoolean("monitor_enabled", false));
             o.put("lastScan", prefs.getLong("last_scan", 0));
             o.put("photoJob", pendingJobName);
@@ -215,15 +221,11 @@ public class MainActivity extends Activity {
                     String raw = prefs.getString("call_folder_uri", "");
                     if (raw.isEmpty()) throw new Exception("통화녹음 폴더가 연결되지 않았습니다.");
 
-                    DocumentFile folder = DocumentFile.fromTreeUri(MainActivity.this, Uri.parse(raw));
-                    if (folder == null || !folder.exists()) throw new Exception("연결한 폴더를 열 수 없습니다.");
-
-                    DocumentFile[] files = folder.listFiles();
-                    Arrays.sort(files, Comparator.comparingLong(DocumentFile::lastModified).reversed());
+                    java.util.List<DocumentFile> files = RecordingFolderScanner.scan(
+                            MainActivity.this, Uri.parse(raw), 100);
 
                     int count = 0;
                     for (DocumentFile f : files) {
-                        if (!f.isFile() || !isAudio(f)) continue;
                         WorkDatabase.CallRecord saved = database.store().callByUri(f.getUri().toString());
                         if (saved == null) {
                             WorkDatabase.CallRecord call = new WorkDatabase.CallRecord();
@@ -247,7 +249,7 @@ public class MainActivity extends Activity {
                         x.put("modified", f.lastModified());
                         x.put("status", saved == null ? "대기" : saved.processingStatus);
                         arr.put(x);
-                        if (++count >= 30) break;
+                        count++;
                     }
                     prefs.edit().putLong("last_scan", System.currentTimeMillis()).apply();
                     if (arr.length() > 0) AutomationLog.add(MainActivity.this, "통화녹음 폴더를 확인했습니다.");
@@ -515,7 +517,7 @@ public class MainActivity extends Activity {
                 out.put("tasks", tasksJson(store.openTasks(100)));
                 out.put("estimates", estimatesJson(store.estimates(100)));
                 out.put("photos", photosJson(store.photos(100)));
-                out.put("calls", callsJson(store.calls(100)));
+                out.put("calls", callsJson(store.allCalls()));
                 out.put("inbox", jobsJson(store.inboxJobs(100)));
                 out.put("favorites", estimateFavoritesJson(store.estimateFavorites(80)));
                 out.put("noteTemplates", estimateNoteTemplatesJson(store.estimateNoteTemplates(80)));
@@ -1398,17 +1400,35 @@ public class MainActivity extends Activity {
 
         if (req == REQ_FOLDER && result == RESULT_OK && data != null && data.getData() != null) {
             Uri uri = data.getData();
-            int flags = data.getFlags() & Intent.FLAG_GRANT_READ_URI_PERMISSION;
+            int flags = data.getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION |
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            if ((flags & Intent.FLAG_GRANT_READ_URI_PERMISSION) == 0) {
+                JSONObject error = new JSONObject();
+                try { error.put("ok", false); error.put("error", "녹음 폴더 읽기 권한을 받지 못했습니다. 다시 선택해주세요."); } catch (Exception ignored) {}
+                callJs("onCallFolderSelected", error);
+                return;
+            }
             try {
                 getContentResolver().takePersistableUriPermission(uri, flags);
-            } catch (Exception ignored) {}
+                DocumentFile folder = DocumentFile.fromTreeUri(this, uri);
+                if (folder == null || !folder.exists() || !folder.isDirectory() || !folder.canRead())
+                    throw new SecurityException("선택한 폴더를 읽을 수 없습니다.");
+            } catch (Exception permissionError) {
+                JSONObject error = new JSONObject();
+                try { error.put("ok", false); error.put("error", "녹음 폴더 권한을 저장하지 못했습니다. 삼성 내 파일에서 실제 통화녹음 폴더를 다시 선택해주세요."); } catch (Exception ignored) {}
+                callJs("onCallFolderSelected", error);
+                return;
+            }
 
             prefs.edit()
                     .putString("call_folder_uri", uri.toString())
+                    .putBoolean("monitor_enabled", true)
                     .putLong("monitor_last_seen", System.currentTimeMillis())
                     .apply();
+            scheduleMonitor();
 
             JSONObject o = statusJson();
+            try { o.put("ok", true); } catch (Exception ignored) {}
             callJs("onCallFolderSelected", o);
             return;
         }

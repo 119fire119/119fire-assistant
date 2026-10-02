@@ -345,6 +345,7 @@ public abstract class WorkDatabase extends RoomDatabase {
         @Query("SELECT * FROM Photo ORDER BY createdAt DESC LIMIT :limit") List<Photo> photos(int limit);
         @Query("SELECT * FROM Photo WHERE id=:id LIMIT 1") Photo photoById(long id);
         @Query("SELECT * FROM CallRecord ORDER BY modifiedAt DESC LIMIT :limit") List<CallRecord> calls(int limit);
+        @Query("SELECT * FROM CallRecord ORDER BY modifiedAt DESC") List<CallRecord> allCalls();
         @Query("SELECT * FROM CallRecord WHERE processingStatus='대기' ORDER BY modifiedAt ASC LIMIT :limit") List<CallRecord> pendingCalls(int limit);
         @Query("SELECT * FROM Inquiry WHERE customerId=:customerId ORDER BY updatedAt DESC LIMIT :limit") List<Inquiry> inquiriesByCustomer(long customerId, int limit);
         @Query("SELECT * FROM Site WHERE customerId=:customerId ORDER BY updatedAt DESC LIMIT :limit") List<Site> sitesByCustomer(long customerId, int limit);
